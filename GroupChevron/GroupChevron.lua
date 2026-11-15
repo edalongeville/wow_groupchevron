@@ -1,0 +1,2695 @@
+-- GroupChevron: marks the members of your party or raid on their nameplate (WoW API side).
+--
+-- A group member's nameplate name is coloured (default #FF4FD8) and a discreet double
+-- down-chevron sits just above it. Friends outside the group (character friends list, and
+-- Battle.net friends' characters unless bnetfriends is off) get their name in the friend
+-- colour (default #3FA7FF) and, unless friendchevron is off, the same chevron in that colour.
+-- With compact on (default), other friendly players (friends included) who are not the
+-- current target show only their name; everyone else's plate is left as Blizzard draws it.
+-- With classcolor on (default off), the other friendly players (not members, not friends,
+-- target or not, compact or not) get their name in their class colour, the client's own.
+-- Unless showlevel is off, friendly players outside the group (friends included) get their
+-- level after the name on compact plates while their health bar is hidden, "Name (19)"
+-- ("Name (??)" when the client does not know it), drawn by our own name FontString. A shown
+-- health bar (full plates, the target, a hurt compact plate) has Blizzard's level beside it, so
+-- the suffix is left out there; when the bar's state cannot be told, the suffix stays.
+--
+-- Robustness rules (fully independent of any other addon):
+--   * Every event handler, hook and slash command runs through SafeCall (pcall): an error
+--     never reaches the UI; the first error of each handler is reported once in chat.
+--   * Every WoW global is checked before use (the Forever client's API may differ), and
+--     values the client marks as "secret" are never used.
+--   * Nameplates are recycled: a plate that stops showing a group member loses its chevron,
+--     and its name gets back the colour it had before we changed it; a plate that leaves
+--     compact mode gets back every part we faded out.
+--   * Forbidden plates (friendly plates in instances) are left alone without any message.
+--   * Blizzard's name FontString is as wide as the health bar, so long (or enlarged) names end
+--     in "...". On the plates this addon handles (members, friends, compact non-members, and
+--     friendly players in the class colour) the name is
+--     drawn by our own FontString, anchored on Blizzard's but free to grow, and Blizzard's is
+--     faded out (alpha 0, restored when the plate is released). If the name text cannot be
+--     read, Blizzard's name is left visible as before.
+
+local addonName, ns = ...
+local Core = ns.Core
+
+local PREFIX = "|cffff4fd8GChev|r: "
+
+-- Chevron geometry, in UI units at chevsize 1 (scaled by chevsize). Each "V" is the
+-- anti-aliased white texture chevron.tga (64x32, coloured with SetVertexColor), V_WIDTH x
+-- V_HEIGHT; the upper "V" is fully opaque, the lower one sits STEP below it at LOWER_ALPHA.
+-- A texture scales smoothly, unlike the rotated solid rectangles used before 0.4.1, which
+-- looked pixelated when enlarged. Those rectangles (ARM_*) remain the fallback when the
+-- texture cannot be loaded.
+local CHEVRON_TEXTURE = "Interface\\AddOns\\GroupChevron\\chevron.tga"
+local V_WIDTH = 10
+local V_HEIGHT = 5
+local STEP = 4
+local LOWER_ALPHA = 0.5
+local GAP = 2 -- between the top of the name and the bottom of the chevron
+local CHEVRON_WIDTH = V_WIDTH
+local CHEVRON_HEIGHT = V_HEIGHT + STEP
+local ARM_LENGTH = 6
+local ARM_THICKNESS = 1.5
+local ARM_ANGLE = 40
+
+-- Fields of the nameplate's UnitFrame that may hold the name FontString, in order.
+local NAME_FIELDS = { "name", "Name", "unitName" }
+
+local db -- GroupChevronDB once ADDON_LOADED ran
+local reportedErrors = {} -- where -> true, once per session
+local noticeShown = {} -- message key -> true, once per session
+local lastNameField -- the field name found on the last marked plate ("" = none found)
+
+-- Every per-plate record below is keyed by the plate's UnitFrame, not by the nameplate frame.
+-- Blizzard pools UnitFrames apart from the plates (NamePlateBaseMixin:AcquireUnitFrame on
+-- NAME_PLATE_UNIT_ADDED, ReleaseUnitFrame on removal), so the UnitFrame a plate shows changes
+-- every time it is reused, and what we changed (a faded name, faded parts, scales, our name
+-- and chevron frames, created as its children) lives on the UnitFrame. Keyed by plate (up to
+-- 0.6.1), a UnitFrame could come back from the pool under another plate, an enemy's say,
+-- with Blizzard's name still faded: enemies without a name.
+
+-- chevrons: UnitFrame -> chevron frame (its child, created once, lazily).
+local chevrons = setmetatable({}, { __mode = "k" })
+-- marks: UnitFrame -> { fs = name FontString or nil, orig = Blizzard's { r, g, b, a } or nil,
+-- applied = our last { r, g, b } } while its plate is marked.
+local marks = setmetatable({}, { __mode = "k" })
+-- labels: UnitFrame -> { frame, text = our FontString, name = Blizzard's name FontString our
+-- name covers right now (faded; nil when none) } (frame created once, lazily, as its child).
+local labels = setmetatable({}, { __mode = "k" })
+
+-- ---------------------------------------------------------------------------------------
+-- Helpers
+
+local function Print(msg)
+  if type(print) == "function" then
+    print(PREFIX .. tostring(msg))
+  end
+end
+
+local function NoticeOnce(key, msg)
+  if not noticeShown[key] then
+    noticeShown[key] = true
+    Print(msg)
+  end
+end
+
+-- SafeCall runs fn(...) under pcall, never re-raises, and reports the first error of each
+-- `where` once per session.
+local function SafeCall(where, fn, ...)
+  local ok, err = pcall(fn, ...)
+  if not ok and not reportedErrors[where] then
+    reportedErrors[where] = true
+    pcall(Print, "error in " .. tostring(where) .. " (reported once): " .. tostring(err))
+  end
+end
+
+-- Readable returns v, or nil if the client marks it as a secret value.
+local function Readable(v)
+  if type(issecretvalue) == "function" then
+    local ok, secret = pcall(issecretvalue, v)
+    if not ok or secret then
+      return nil
+    end
+  end
+  return v
+end
+
+-- Try calls fn(...) if it is a function and returns its first result if readable, else nil.
+local function Try(fn, ...)
+  if type(fn) ~= "function" then
+    return nil
+  end
+  local ok, v = pcall(fn, ...)
+  if not ok then
+    return nil
+  end
+  return Readable(v)
+end
+
+-- Field returns t[k] if it can be read (a forbidden frame raises on any access) and is not
+-- secret, else nil.
+local function Field(t, k)
+  if type(t) ~= "table" then
+    return nil
+  end
+  local ok, v = pcall(function() return t[k] end)
+  if not ok then
+    return nil
+  end
+  return Readable(v)
+end
+
+local function Pack(ok, ...)
+  if not ok then
+    return nil
+  end
+  local out = { n = select("#", ...) }
+  for i = 1, out.n do
+    out[i] = Readable((select(i, ...)))
+  end
+  return out
+end
+
+-- Results returns obj:method(...)'s results as { n = count, ... } (secret values replaced by
+-- nil), or nil when the method is missing or raises an error (e.g. a forbidden frame).
+local function Results(obj, method, ...)
+  local fn = Field(obj, method)
+  if type(fn) ~= "function" then
+    return nil
+  end
+  return Pack(pcall(fn, obj, ...))
+end
+
+-- Method calls obj:method(...) safely and returns its first readable result, or nil.
+local function Method(obj, method, ...)
+  local out = Results(obj, method, ...)
+  return out and out[1]
+end
+
+-- Friends: C_FriendList.IsFriend(guid) (character friends list) and
+-- C_BattleNet.GetAccountInfoByGUID(guid) (Battle.net friends), unverified on the Forever client;
+-- missing (nil) when the client does not have them, so every plate counts as "not a friend".
+local unitAPI = {
+  UnitIsPlayer = UnitIsPlayer,
+  UnitInParty = UnitInParty,
+  UnitInRaid = UnitInRaid,
+  UnitIsUnit = UnitIsUnit,
+  UnitIsFriend = UnitIsFriend,
+  UnitGUID = UnitGUID,
+  UnitHealth = UnitHealth,
+  UnitHealthMax = UnitHealthMax,
+  -- Secret-safe health (compact plates' health bar): UnitHealthPercent(unit, false, curve) with a
+  -- C_CurveUtil colour curve; checked in game on the Forever client (#284), missing = the
+  -- UnitHealth / UnitHealthMax fallback.
+  UnitHealthPercent = UnitHealthPercent,
+  CreateColorCurve = Field(C_CurveUtil, "CreateColorCurve"),
+  CreateColor = CreateColor,
+  UnitLevel = UnitLevel,
+  IsFriend = Field(C_FriendList, "IsFriend"),
+  GetAccountInfoByGUID = Field(C_BattleNet, "GetAccountInfoByGUID"),
+  -- Guild: IsInGuild, UnitIsInMyGuild(unit), else IsPlayerInGuildFromGUID(guid) (global or
+  -- C_PlayerInfo); unverified on the Forever client, missing = nobody is a guildmate.
+  IsInGuild = IsInGuild,
+  UnitIsInMyGuild = UnitIsInMyGuild,
+  IsPlayerInGuildFromGUID = IsPlayerInGuildFromGUID or Field(C_PlayerInfo, "IsPlayerInGuildFromGUID"),
+  -- Class colours (classcolor): UnitClass's token, then C_ClassColor.GetClassColor(token), else
+  -- RAID_CLASS_COLORS[token]; unverified on the Forever client, missing = no class colour.
+  UnitClass = UnitClass,
+  GetClassColor = Field(C_ClassColor, "GetClassColor"),
+  RAID_CLASS_COLORS = type(RAID_CLASS_COLORS) == "table" and RAID_CLASS_COLORS or nil,
+  issecretvalue = issecretvalue,
+}
+
+local function IsMember(unit)
+  return Core.IsGroupMember(unitAPI, unit)
+end
+
+local function Enabled()
+  return type(db) == "table" and db.enabled == true
+end
+
+local function Color()
+  if type(db) == "table" and Core.ValidColor(db.color) then
+    return db.color[1], db.color[2], db.color[3]
+  end
+  local c = Core.DEFAULT_COLOR
+  return c[1], c[2], c[3]
+end
+
+-- FriendColor returns the friend colour (friends outside the group).
+local function FriendColor()
+  if type(db) == "table" and Core.ValidColor(db.friendcolor) then
+    return db.friendcolor[1], db.friendcolor[2], db.friendcolor[3]
+  end
+  local c = Core.DEFAULT_FRIEND_COLOR
+  return c[1], c[2], c[3]
+end
+
+-- GuildColor returns the guild colour (guildmates outside the group).
+local function GuildColor()
+  if type(db) == "table" and Core.ValidColor(db.guildcolor) then
+    return db.guildcolor[1], db.guildcolor[2], db.guildcolor[3]
+  end
+  local c = Core.DEFAULT_GUILD_COLOR
+  return c[1], c[2], c[3]
+end
+
+-- FLAG_DEFAULTS are the saved on/off settings (besides enabled and compact) and their default.
+local FLAG_DEFAULTS = {
+  friendchevron = true, bnetfriends = true, guildchevron = true, classcolor = false, showlevel = true,
+}
+
+-- Flag returns a saved boolean setting of FLAG_DEFAULTS (its default when missing or invalid).
+local function Flag(key)
+  if type(db) == "table" and type(db[key]) == "boolean" then
+    return db[key]
+  end
+  return FLAG_DEFAULTS[key] == true
+end
+
+-- Factor returns a saved size factor (1 when missing or invalid): "chevsize"; for group
+-- members "textsize", "barsize" (health bar), "buffsize" (auras); for other friendly players
+-- (compact or not, the target included, see Core.OtherSizes) "othersize" (name) and
+-- "otherbarsize" (health bar, shown while hurt when compact).
+local function Factor(key)
+  if type(db) == "table" and Core.ValidFactor(db[key], key) then
+    return db[key]
+  end
+  return Core.DEFAULT_FACTOR
+end
+
+-- Gap returns a saved name gap (0 when missing or invalid, see Core.ValidGap): "namegap" for
+-- group members, "othernamegap" for other friendly players (wherever othersize applies).
+local function Gap(key)
+  if type(db) == "table" and Core.ValidGap(db[key]) then
+    return db[key]
+  end
+  return Core.DEFAULT_GAP
+end
+
+-- ChosenFontObject returns the client's font object the player chose for our own name labels
+-- (db.font), or nil for "default" and when the global is missing or not a table (the caller
+-- then keeps Blizzard's name font).
+local function ChosenFontObject()
+  local f = type(db) == "table" and Core.FindFont(db.font)
+  if not f or not f.object then
+    return nil
+  end
+  local obj = _G[f.object]
+  if type(obj) ~= "table" then
+    return nil
+  end
+  return obj
+end
+
+-- baseFonts: name FontString ->{ path, size, flags } as Blizzard had set it, cached the first
+-- time we read it (plates are recycled, so it is weak-keyed). Only used for our own name when
+-- Blizzard's has no font object. Blizzard's name is never given a font with SetFont: that
+-- would replace its font object, whose alphabet fallbacks draw Cyrillic, Korean and Chinese
+-- names (0.4.0 did, so those names showed as boxes, even on recycled plates).
+local baseFonts = setmetatable({}, { __mode = "k" })
+
+-- BaseFont returns { path, size, flags } of the name as Blizzard set it (cached the first
+-- time), or nil when it cannot be read.
+local function BaseFont(fs)
+  if type(fs) ~= "table" or type(fs.GetFont) ~= "function" then
+    return nil
+  end
+  local base = baseFonts[fs]
+  if not base then
+    local ok, path, size, flags = pcall(fs.GetFont, fs)
+    path, size, flags = Readable(path), Readable(size), Readable(flags)
+    if not ok or type(path) ~= "string" or type(size) ~= "number" then
+      return nil
+    end
+    base = { path, size, flags }
+    baseFonts[fs] = base
+  end
+  return base
+end
+
+local function IsNameplateUnit(unit)
+  return type(unit) == "string" and unit:sub(1, 9) == "nameplate"
+end
+
+local function PlateForUnit(unit)
+  if type(C_NamePlate) ~= "table" then
+    return nil
+  end
+  return Try(C_NamePlate.GetNamePlateForUnit, unit)
+end
+
+-- UnitFrameOf returns plate.UnitFrame, or nil (also for a forbidden plate, silently).
+local function UnitFrameOf(plate)
+  local uf = Field(plate, "UnitFrame")
+  if type(uf) == "table" then
+    return uf
+  end
+  return nil
+end
+
+-- PlateUnit returns the unit token ("nameplateN") a plate shows, or nil.
+local function PlateUnit(plate)
+  if type(plate) ~= "table" then
+    return nil
+  end
+  local candidates = { Field(plate, "namePlateUnitToken"), Field(plate, "unitToken") }
+  candidates[#candidates + 1] = Method(plate, "GetUnit")
+  local uf = UnitFrameOf(plate)
+  if uf then
+    candidates[#candidates + 1] = Field(uf, "unit")
+  end
+  for i = 1, 4 do
+    if IsNameplateUnit(candidates[i]) then
+      return candidates[i]
+    end
+  end
+  return nil
+end
+
+-- FindName returns the name FontString of a nameplate's UnitFrame and its field name.
+local function FindName(uf)
+  for _, field in ipairs(NAME_FIELDS) do
+    local fs = Field(uf, field)
+    if type(fs) == "table" and type(Field(fs, "SetTextColor")) == "function" then
+      return fs, field
+    end
+  end
+  return nil, nil
+end
+
+-- ---------------------------------------------------------------------------------------
+-- Chevron
+
+-- LayoutArm sizes and places one arm of a "V" (fallback drawing) for the size factor f.
+local function LayoutArm(frame, tex, f)
+  local a = math.rad(ARM_ANGLE)
+  local length = ARM_LENGTH * f
+  tex:SetSize(length, ARM_THICKNESS * f)
+  tex:ClearAllPoints()
+  local cx = tex.side * (length / 2) * math.cos(a)
+  local cy = tex.baseY * f + (length / 2) * math.sin(a)
+  tex:SetPoint("CENTER", frame, "BOTTOM", cx, cy)
+  if type(tex.SetRotation) == "function" then
+    tex:SetRotation(tex.side * a)
+  end
+end
+
+-- LayoutChevron (re)sizes the whole chevron for the saved chevsize; a no-op when unchanged.
+-- The GAP above the name is not scaled (it is the frame's anchor offset).
+local function LayoutChevron(frame)
+  local f = Factor("chevsize")
+  if frame.factor == f then
+    return
+  end
+  frame.factor = f
+  frame:SetSize(CHEVRON_WIDTH * f, CHEVRON_HEIGHT * f)
+  for _, tex in ipairs(frame.vs) do
+    tex:SetSize(V_WIDTH * f, V_HEIGHT * f)
+    tex:ClearAllPoints()
+    tex:SetPoint("BOTTOM", frame, "BOTTOM", 0, tex.baseY * f)
+  end
+  for _, tex in ipairs(frame.arms) do
+    LayoutArm(frame, tex, f)
+  end
+end
+
+-- AddV adds one textured "V" whose bottom is baseY above the frame's bottom. It returns false
+-- (and adds nothing) when the client cannot load the texture.
+local function AddV(frame, baseY, alpha)
+  local tex = frame:CreateTexture(nil, "OVERLAY")
+  local ok, loaded = pcall(tex.SetTexture, tex, CHEVRON_TEXTURE)
+  if not ok or loaded == false then
+    Method(tex, "Hide")
+    return false
+  end
+  -- Free positioning and bilinear filtering: smooth at every size.
+  Method(tex, "SetSnapToPixelGrid", false)
+  Method(tex, "SetTexelSnappingBias", 0)
+  tex.baseY = baseY
+  tex:SetAlpha(alpha)
+  frame.vs[#frame.vs + 1] = tex
+  return true
+end
+
+-- AddArm adds one arm of a "V" (fallback drawing) whose bottom point is baseY pixels above the
+-- frame's bottom centre. side is -1 (left arm) or 1 (right arm).
+local function AddArm(frame, side, baseY, alpha)
+  local tex = frame:CreateTexture(nil, "OVERLAY")
+  tex.side, tex.baseY = side, baseY
+  tex:SetAlpha(alpha)
+  frame.arms[#frame.arms + 1] = tex
+end
+
+local function ColorChevron(frame, r, g, b)
+  for _, tex in ipairs(frame.vs) do
+    tex:SetVertexColor(r, g, b, 1)
+  end
+  for _, tex in ipairs(frame.arms) do
+    tex:SetColorTexture(r, g, b, 1)
+  end
+end
+
+-- GetChevron returns the plate's chevron frame, creating it on first use. It is a child of
+-- the plate's UnitFrame, so it fades and hides with the plate.
+local function GetChevron(plate, uf)
+  local frame = chevrons[plate]
+  if frame then
+    return frame
+  end
+  if type(CreateFrame) ~= "function" then
+    return nil
+  end
+  frame = CreateFrame("Frame", nil, uf)
+  frame.vs, frame.arms = {}, {}
+  if not (AddV(frame, STEP, 1) and AddV(frame, 0, LOWER_ALPHA)) then
+    frame.vs = {}
+    NoticeOnce("notexture", "chevron texture not found (restart the game after an update): drawing a simpler chevron")
+    local bottom = ARM_THICKNESS / 2
+    AddArm(frame, -1, bottom + STEP, 1)
+    AddArm(frame, 1, bottom + STEP, 1)
+    AddArm(frame, -1, bottom, LOWER_ALPHA)
+    AddArm(frame, 1, bottom, LOWER_ALPHA)
+  end
+  LayoutChevron(frame)
+  frame:Hide()
+  chevrons[plate] = frame
+  return frame
+end
+
+-- ---------------------------------------------------------------------------------------
+-- Full name: our own FontString over Blizzard's, so the name is never cut to the bar width.
+
+-- Blizzard's name FontString lives on a pooled UnitFrame, so a name we faded travels to the
+-- next unit (an enemy, say) unless it is given back. Up to 0.12.0 the alpha to give back was
+-- read with GetAlpha when the name was faded, and the record of the fade was dropped whatever
+-- the SetAlpha that gave it back did (Method swallows errors). A name that was ever faded
+-- without being given back (one silent failure, or any path we never saw) was then read as
+-- "originally 0" the next time and given back as 0: the name stayed invisible for good, even
+-- on a plate refreshed as the target (enemies without a name, a third time).
+-- Since 0.12.1:
+--   * Blizzard's nameplate code never sets the name's alpha (Blizzard_NamePlates and
+--     CompactUnitFrame, 12.1.5 UI source: only Show/Hide, SetText and colours), so a name
+--     we do not cover is always given alpha 1, never a value read back;
+--   * fadedNames remembers every name we faded until a SetAlpha(1) is known to have worked;
+--   * every refresh of a plate ends with SyncName, which gives Blizzard's name alpha 1 unless
+--     our own name covers it right now, whatever the records say (see Refresh).
+
+-- fadedNames: Blizzard's name FontString -> true while we may have left it at alpha 0.
+local fadedNames = setmetatable({}, { __mode = "k" })
+local restoreFailures = 0 -- names whose SetAlpha(1) failed (retried later), for /gchev
+
+-- FadeName fades Blizzard's name out under ours.
+local function FadeName(fs)
+  fadedNames[fs] = true
+  Method(fs, "SetAlpha", 0)
+end
+
+-- RestoreName gives Blizzard's name alpha 1. It returns true when that is known to have
+-- worked (the call did not fail, and the alpha reads 1 when it can be read); otherwise the name
+-- stays in fadedNames, to be retried by the next SyncName or RefreshAll.
+local function RestoreName(fs)
+  if not Results(fs, "SetAlpha", 1) then
+    restoreFailures = restoreFailures + 1
+    NoticeOnce("restorefail", "could not give a nameplate name back (retried on the next refresh)")
+    return false
+  end
+  local a = Method(fs, "GetAlpha")
+  if type(a) == "number" and a < 0.99 then
+    restoreFailures = restoreFailures + 1
+    NoticeOnce("restorefail", "could not give a nameplate name back (retried on the next refresh)")
+    return false
+  end
+  fadedNames[fs] = nil
+  return true
+end
+
+-- HideFullName hides our name on the plate and gives Blizzard's its alpha back.
+local function HideFullName(plate)
+  local rec = labels[plate]
+  if not rec then
+    return
+  end
+  Method(rec.frame, "Hide")
+  if rec.name then
+    local fs = rec.name
+    rec.name = nil
+    RestoreName(fs)
+  end
+end
+
+-- Covered returns true when our own name covers fs on the UnitFrame uf right now (then
+-- Blizzard's name is meant to be faded).
+local function Covered(uf, fs)
+  local rec = labels[uf]
+  return rec ~= nil and rec.name == fs
+end
+
+-- SyncName makes Blizzard's name on uf visible unless our own name covers it. It reads no
+-- record of what was there before: alpha 1 is the only value Blizzard ever uses.
+local function SyncName(uf)
+  local fs = FindName(uf)
+  if not fs or Covered(uf, fs) then
+    return
+  end
+  local a = Method(fs, "GetAlpha")
+  if fadedNames[fs] or (type(a) == "number" and a < 0.99) then
+    RestoreName(fs)
+  end
+end
+
+-- NameText returns the name text of fs, or nil when it cannot be read (or is secret).
+local function NameText(fs)
+  local text = Method(fs, "GetText")
+  if type(text) ~= "string" or text == "" then
+    return nil
+  end
+  return text
+end
+
+-- ShowFullName draws fs's text with our own FontString, in fs's font object (so the same
+-- alphabets) scaled by size (its frame's scale), in r, g, b, anchored on fs's bottom centre
+-- and free to grow both ways, lifted by lift + gap (Core.NameOffset), and fades fs out. With a
+-- level (Core.UnitLevel; compact plates only), the text is "<name> (<level>)"
+-- (Core.NameWithLevel); FollowBar may then drop the suffix while the health bar is shown, with
+-- a second FontString (rec.short, the name alone, created only for a level) drawn over the same
+-- spot. Here the suffix is always shown (rec.short at alpha 0). Blizzard's text itself is never
+-- changed. It returns
+-- our FontString (the chevron's anchor), or nil when the name stays Blizzard's (text or font
+-- unreadable, no CreateFrame, or fs not shown).
+local function ShowFullName(plate, uf, fs, size, r, g, b, lift, gap, level)
+  local plain = NameText(fs)
+  local text = plain
+  if text and level then
+    text = Core.NameWithLevel(text, level)
+  end
+  local fontObject = ChosenFontObject() or Method(fs, "GetFontObject")
+  if type(fontObject) ~= "table" then
+    fontObject = nil
+  end
+  local base = not fontObject and BaseFont(fs)
+  if not text or not (fontObject or base) or type(CreateFrame) ~= "function" or Method(fs, "IsShown") == false then
+    HideFullName(plate)
+    return nil
+  end
+  local rec = labels[plate]
+  if not rec then
+    local frame = CreateFrame("Frame", nil, uf)
+    Method(frame, "SetAllPoints", uf)
+    local label = frame:CreateFontString(nil, "OVERLAY")
+    Method(label, "SetWordWrap", false)
+    Method(label, "SetJustifyH", "CENTER")
+    rec = { frame = frame, text = label }
+    labels[plate] = rec
+  end
+  if rec.name and rec.name ~= fs then
+    HideFullName(plate) -- the plate's name FontString changed: give the old one back
+  end
+  if text ~= plain and not rec.short then
+    local short = rec.frame:CreateFontString(nil, "OVERLAY")
+    Method(short, "SetWordWrap", false)
+    Method(short, "SetJustifyH", "CENTER")
+    rec.short = short
+  end
+  -- textsize scales the frame, not the font: the font object (and its fallbacks) stays whole.
+  Method(rec.frame, "SetScale", size)
+  local offset = Results(fs, "GetShadowOffset")
+  local sc = Results(fs, "GetShadowColor")
+  for _, label in ipairs({ rec.text, rec.short }) do
+    if fontObject then
+      label:SetFontObject(fontObject)
+    else
+      label:SetFont(base[1], base[2], base[3])
+    end
+    -- Same shadow as Blizzard's name (the outline comes with the font flags).
+    if offset and type(offset[1]) == "number" and type(offset[2]) == "number" then
+      Method(label, "SetShadowOffset", offset[1], offset[2])
+      if sc and type(sc[1]) == "number" and type(sc[2]) == "number" and type(sc[3]) == "number" then
+        Method(label, "SetShadowColor", sc[1], sc[2], sc[3], type(sc[4]) == "number" and sc[4] or 1)
+      end
+    end
+    label:SetTextColor(r, g, b, 1)
+    label:ClearAllPoints()
+    -- lift (buffs) and gap (namegap / othernamegap) are in the parent's units; our frame is
+    -- scaled by size.
+    label:SetPoint("BOTTOM", fs, "BOTTOM", 0, Core.NameOffset(lift, gap, size))
+  end
+  local label = rec.text
+  label:SetText(text)
+  Method(label, "SetAlpha", 1)
+  if rec.short then
+    rec.short:SetText(plain)
+    Method(rec.short, "SetAlpha", 0)
+  end
+  -- FollowBar's texts: the name with the level (nil without a level) and the name alone.
+  rec.full, rec.plain = text ~= plain and text or nil, plain
+  rec.name = fs
+  FadeName(fs)
+  rec.frame:Show()
+  return label
+end
+
+-- ---------------------------------------------------------------------------------------
+-- Bar and buff sizes: SetScale on Blizzard's health bar container and aura frame, the original
+-- scale recorded per plate and given back when the plate leaves the mode that scaled it.
+
+-- scaled: plate -> { [part] = its scale before we changed it }.
+local scaled = setmetatable({}, { __mode = "k" })
+
+-- BarPart returns the plate's health bar part to scale (HealthBarsContainer, else healthBar).
+local function BarPart(uf)
+  local part = Field(uf, "HealthBarsContainer")
+  if type(part) ~= "table" then
+    part = Field(uf, "healthBar")
+  end
+  return type(part) == "table" and part or nil
+end
+
+-- AuraPart returns the plate's aura (buff/debuff) frame, or nil.
+local function AuraPart(uf)
+  local part = Field(uf, "AurasFrame")
+  return type(part) == "table" and part or nil
+end
+
+-- ScalePart sets part's scale to its original scale x f (no-op without SetScale).
+local function ScalePart(plate, part, f)
+  if not part or type(Field(part, "SetScale")) ~= "function" then
+    return
+  end
+  local rec = scaled[plate]
+  if not rec then
+    rec = {}
+    scaled[plate] = rec
+  end
+  if rec[part] == nil then
+    local orig = Method(part, "GetScale")
+    rec[part] = (type(orig) == "number" and orig > 0) and orig or 1
+  end
+  Method(part, "SetScale", rec[part] * f)
+end
+
+-- The health bar is stretched by Blizzard between the top corners of the cast bar container,
+-- so SetScale alone only made it taller. Nameplate regions cannot be measured (GetPoint,
+-- GetWidth: "Can't measure restricted regions"), so the bar is laid out again from what
+-- Blizzard's own layout uses (NamePlateUnitFrameMixin: BOTTOMLEFT / BOTTOMRIGHT on
+-- CastBarsContainer's TOPLEFT / TOPRIGHT, y = NamePlateSetupOptions.castBarToHealthBarSpacing)
+-- and the content width it computes (nameplate width minus both insets). When any of it is
+-- missing, the bar is only scaled, as in 0.6.0.
+
+-- bars: plate -> { part, scale, moved }: the bar's scale before ours, and whether we laid it out
+-- (then its Blizzard layout is set back by RestoreBar).
+local bars = setmetatable({}, { __mode = "k" })
+
+-- BlizzardNumber returns a number Blizzard keeps in a global table (t[key]), or nil.
+local function BlizzardNumber(t, key)
+  local v = Field(t, key)
+  return type(v) == "number" and v or nil
+end
+
+-- ContentWidth returns the width of the plate's content (cast bar and health bar) as Blizzard
+-- computes it, or nil.
+local function ContentWidth()
+  local driver = _G.NamePlateDriverFrame
+  local consts, opts = _G.NamePlateConstants, _G.NamePlateSetupOptions
+  local cvar = Field(consts, "STYLE_CVAR")
+  if type(driver) ~= "table" or type(cvar) ~= "string" then
+    return nil
+  end
+  local style
+  if type(C_CVar) == "table" then
+    style = tonumber(Try(C_CVar.GetCVar, cvar))
+  end
+  local scale = Method(driver, "GetNamePlateScale", style)
+  local width = Method(driver, "GetNamePlateWidth", style, scale)
+  local inset = BlizzardNumber(opts, "insetWidth")
+  if type(width) ~= "number" or not inset then
+    return nil
+  end
+  return width - 2 * inset
+end
+
+-- LayBar anchors bar on uf's cast bar container like Blizzard does, widened for factor f with
+-- the bar's own scale being scale x f. It returns false (nothing changed) when Blizzard's
+-- layout cannot be known.
+local function LayBar(uf, bar, scale, f)
+  local cast = Field(uf, "CastBarsContainer")
+  local spacing = BlizzardNumber(_G.NamePlateSetupOptions, "castBarToHealthBarSpacing")
+  if type(cast) ~= "table" or not spacing then
+    return false
+  end
+  local left, right, y = Core.BarOffsets(ContentWidth(), spacing, scale, f)
+  if not left then
+    return false
+  end
+  Method(bar, "ClearAllPoints")
+  Method(bar, "SetPoint", "BOTTOMLEFT", cast, "TOPLEFT", left, y)
+  Method(bar, "SetPoint", "BOTTOMRIGHT", cast, "TOPRIGHT", right, y)
+  return true
+end
+
+-- RestoreBar gives the plate's health bar its original scale and, if we moved it, Blizzard's
+-- layout back.
+local function RestoreBar(plate)
+  local rec = bars[plate]
+  if not rec then
+    return
+  end
+  bars[plate] = nil
+  Method(rec.part, "SetScale", rec.scale)
+  if rec.moved and not LayBar(rec.uf, rec.part, rec.scale, 1) then
+    NoticeOnce("barlayout", "could not give a health bar Blizzard's layout back: /reload fixes it")
+  end
+end
+
+-- ScaleBar makes the plate's health bar part f times Blizzard's size (no-op without SetScale).
+local function ScaleBar(plate, uf, part, f)
+  if not part or type(Field(part, "SetScale")) ~= "function" then
+    return
+  end
+  local rec = bars[plate]
+  if rec and rec.part ~= part then
+    RestoreBar(plate)
+    rec = nil
+  end
+  if not rec then
+    local orig = Method(part, "GetScale")
+    rec = { part = part, uf = uf, scale = (type(orig) == "number" and orig > 0) and orig or 1 }
+    bars[plate] = rec
+  end
+  Method(part, "SetScale", rec.scale * f)
+  -- Only the HealthBarsContainer is laid out by Blizzard as above.
+  if part == Field(uf, "HealthBarsContainer") and (f ~= 1 or rec.moved) then
+    if LayBar(uf, part, rec.scale, f) then
+      rec.moved = true
+    else
+      NoticeOnce("barwidth", "nameplate layout not found: health bar size changes the height only")
+    end
+  end
+end
+
+-- RestoreScales gives every part we scaled on the plate its original scale (and the health
+-- bar its anchors) back.
+local function RestoreScales(plate)
+  RestoreBar(plate)
+  local rec = scaled[plate]
+  if not rec then
+    return
+  end
+  scaled[plate] = nil
+  for part, orig in pairs(rec) do
+    Method(part, "SetScale", orig)
+  end
+end
+
+-- BuffLift returns how far up the name of a member's plate goes so the buffs, scaled by
+-- buffsize about their middle on the left of the bar, never reach it (Core.BuffLift, from
+-- Blizzard's NamePlateConstants.AURA_ITEM_HEIGHT and the aura frame's auraItemScale; 0 when
+-- they are unknown or buffsize is 1).
+local function BuffLift(plate, uf)
+  local aura = AuraPart(uf)
+  local height = BlizzardNumber(_G.NamePlateConstants, "AURA_ITEM_HEIGHT")
+  if not aura or not height then
+    return 0
+  end
+  local base = scaled[plate] and scaled[plate][aura] or Method(aura, "GetScale")
+  return Core.BuffLift(height, BlizzardNumber(aura, "auraItemScale") or 1, type(base) == "number" and base or 1,
+    Factor("buffsize"))
+end
+
+-- ---------------------------------------------------------------------------------------
+-- Marking
+
+local function ApplyColor(fs, r, g, b)
+  fs:SetTextColor(r, g, b)
+  if type(fs.SetVertexColor) == "function" then
+    fs:SetVertexColor(r, g, b)
+  end
+end
+
+local function SameColor(r1, g1, b1, r2, g2, b2)
+  local function near(x, y)
+    return type(x) == "number" and type(y) == "number" and math.abs(x - y) < 0.01
+  end
+  return near(r1, r2) and near(g1, g2) and near(b1, b2)
+end
+
+-- ReadColor returns the FontString's current colour as { r, g, b, a }, or nil.
+local function ReadColor(fs)
+  if type(fs.GetTextColor) ~= "function" then
+    return nil
+  end
+  local ok, r, g, b, a = pcall(fs.GetTextColor, fs)
+  r, g, b, a = Readable(r), Readable(g), Readable(b), Readable(a)
+  if not ok or type(r) ~= "number" or type(g) ~= "number" or type(b) ~= "number" then
+    return nil
+  end
+  return { r, g, b, type(a) == "number" and a or 1 }
+end
+
+-- Styles of a marked plate (see Mark):
+--   kind    : "member", "friend" / "class" (full plate) or "friendcompact" / "classcompact"
+--             (with compact mode);
+--   r, g, b : the name and chevron colour;
+--   chevron : whether the chevron is shown;
+--   size    : the scale of our name frame;
+--   scales  : whether the member sizes (barsize, buffsize, and the name lift) apply;
+--   bar     : the health bar scale (otherbarsize) of another friendly player's full plate, or nil
+--             (members use barsize; compact plates are scaled by Compact);
+--   level   : the level shown after the name (friendly non-members on compact plates only, see
+--             Level and FollowBar), or nil;
+--   gap     : the name's gap above Blizzard's name position (namegap for members, othernamegap
+--             for everyone else), added to the buff lift.
+-- A friend's full plate is Blizzard's default plate plus the colour and the chevron: its name
+-- uses othersize and its health bar otherbarsize (the member sizes never apply). A compact
+-- friend's name and health bar use them too (set by Compact). The class colour (classcolor)
+-- gives other friendly players the same look as a friend, without the chevron.
+
+-- OtherFactor is the size of another friendly player's plate: othersize / otherbarsize, compact
+-- or full, compact on or off, target or not (Core.OtherSizes), so the name keeps its size when
+-- the player is targeted or untargeted.
+local function OtherFactor(key)
+  return Factor(key)
+end
+
+local function MemberStyle()
+  local r, g, b = Color()
+  return {
+    kind = "member", r = r, g = g, b = b, chevron = true, size = Factor("textsize"), scales = true,
+    gap = Gap("namegap"),
+  }
+end
+
+local function FriendStyle(compact, level)
+  local r, g, b = FriendColor()
+  return {
+    kind = compact and "friendcompact" or "friend",
+    r = r, g = g, b = b,
+    chevron = Flag("friendchevron"),
+    size = OtherFactor("othersize"),
+    bar = not compact and OtherFactor("otherbarsize") or nil,
+    scales = false,
+    level = level,
+    gap = Gap("othernamegap"),
+  }
+end
+
+-- A guildmate is styled like a friend, in the guild colour (guildchevron).
+local function GuildStyle(compact, level)
+  local r, g, b = GuildColor()
+  return {
+    kind = compact and "guildcompact" or "guild",
+    r = r, g = g, b = b,
+    chevron = Flag("guildchevron"),
+    size = OtherFactor("othersize"),
+    bar = not compact and OtherFactor("otherbarsize") or nil,
+    scales = false,
+    level = level,
+    gap = Gap("othernamegap"),
+  }
+end
+
+-- ClassStyle is the look of a friendly player's name in the class colour c ({ r, g, b }):
+-- like a friend's, without the chevron.
+local function ClassStyle(c, compact, level)
+  return {
+    kind = compact and "classcompact" or "class",
+    r = c[1], g = c[2], b = c[3],
+    chevron = false,
+    size = OtherFactor("othersize"),
+    bar = not compact and OtherFactor("otherbarsize") or nil,
+    scales = false,
+    level = level,
+    gap = Gap("othernamegap"),
+  }
+end
+
+-- RelationStyle returns the style of a friend or guildmate plate.
+local function RelationStyle(relation, compact, level)
+  if relation == "guild" then
+    return GuildStyle(compact, level)
+  end
+  return FriendStyle(compact, level)
+end
+
+-- Mark colours the plate's name and shows the chevron in style (see above). marks[plate]
+-- remembers Blizzard's colour across style changes (member <-> friend), so leaving every
+-- marked mode gives Blizzard's colour back, never one of ours; on a style change the sizes of
+-- the previous style are given back first.
+local function Mark(plate, uf, style)
+  local fs, field = FindName(uf)
+  lastNameField = field or ""
+  local m = marks[plate]
+  if m and m.kind ~= style.kind then
+    RestoreScales(plate)
+  end
+  if not m or m.fs ~= fs then
+    m = { fs = fs }
+    marks[plate] = m
+  end
+  m.kind = style.kind
+  local r, g, b = style.r, style.g, style.b
+  if fs then
+    -- The colour to restore later is Blizzard's: a colour that is still the one we applied
+    -- last is ours, not Blizzard's.
+    local cur = ReadColor(fs)
+    local mine = m.applied and cur and SameColor(cur[1], cur[2], cur[3], m.applied[1], m.applied[2], m.applied[3])
+    if cur and not mine then
+      m.orig = cur
+    end
+    m.applied = { r, g, b }
+    ApplyColor(fs, r, g, b)
+  elseif style.chevron then
+    NoticeOnce("noname", "name text not found on the nameplate (tried UnitFrame.name, .Name, .unitName): "
+      .. "only the chevron is shown")
+  end
+  local anchor = fs
+  if fs then
+    local lift = style.scales and BuffLift(plate, uf) or 0
+    anchor = ShowFullName(plate, uf, fs, style.size, r, g, b, lift, style.gap, style.level) or fs
+  end
+  if style.chevron then
+    local chevron = GetChevron(plate, uf)
+    if chevron then
+      chevron:ClearAllPoints()
+      if anchor then
+        chevron:SetPoint("BOTTOM", anchor, "TOP", 0, GAP)
+      else
+        chevron:SetPoint("BOTTOM", uf, "TOP", 0, GAP)
+      end
+      LayoutChevron(chevron)
+      ColorChevron(chevron, r, g, b)
+      chevron:Show()
+    end
+  elseif chevrons[plate] then
+    chevrons[plate]:Hide()
+  end
+  if style.scales then
+    ScaleBar(plate, uf, BarPart(uf), Factor("barsize"))
+    ScalePart(plate, AuraPart(uf), Factor("buffsize"))
+  elseif style.bar then
+    -- Another friendly player's full plate: only the health bar (otherbarsize); compact plates
+    -- are scaled by Compact.
+    ScaleBar(plate, uf, BarPart(uf), style.bar)
+  end
+end
+
+-- Unmark hides the plate's chevron. With restore, a name we coloured gets back the colour it
+-- had before; without it (the plate now shows another unit, which Blizzard has coloured or
+-- will colour), the colour is left alone.
+local function Unmark(plate, restore)
+  local chevron = chevrons[plate]
+  if chevron then
+    chevron:Hide()
+  end
+  HideFullName(plate)
+  if marks[plate] then
+    RestoreScales(plate)
+  end
+  local m = marks[plate]
+  marks[plate] = nil
+  if restore and m and m.fs and m.orig then
+    local o = m.orig
+    m.fs:SetTextColor(o[1], o[2], o[3], o[4])
+    if type(m.fs.SetVertexColor) == "function" then
+      m.fs:SetVertexColor(o[1], o[2], o[3], o[4])
+    end
+  end
+end
+
+-- ---------------------------------------------------------------------------------------
+-- Compact mode: name only on friendly non-member players
+--
+-- There is no per-plate "show only the name" setter, so the parts of the plate are faded out
+-- with SetAlpha(0) (the game calls Show() on them all the time). Nothing is ever hidden on the
+-- plate itself, on UnitFrame, on the name FontString or its ancestors, or on our chevron.
+
+-- MAX_DEPTH bounds the walk from the name FontString up to UnitFrame.
+local MAX_DEPTH = 10
+
+-- hidden: plate -> { set = part -> true, list = { parts in order }, drive = part -> true (the
+-- health bar parts driven by the health curve's alpha, a subset of set), curve = the curve
+-- answered, hurt = the fallback's answer, unit } while the plate is in compact mode; absent
+-- otherwise (so "hidden[plate] ~= nil" means "compact").
+local hidden = setmetatable({}, { __mode = "k" })
+-- owners: part -> the plate whose record holds it (for the OnShow hook).
+local owners = setmetatable({}, { __mode = "k" })
+-- hooked: frame -> true once its OnShow is hooked (never hooked twice).
+local hooked = setmetatable({}, { __mode = "k" })
+
+-- healthCurve: the colour curve of Core.HealthCurve, built once (curveBuilt), nil if it cannot be.
+local healthCurve, curveBuilt = nil, false
+
+-- HealthAlpha returns true and the alpha unit's health bar should have (1 while hurt, 0 at full
+-- health; a secret value on clients where health is secret: never read it, only pass it to
+-- SetAlpha), or false when the client cannot give it (no curve API, an error).
+local function HealthAlpha(unit)
+  if not curveBuilt then
+    curveBuilt = true
+    healthCurve = Core.HealthCurve(unitAPI)
+  end
+  if healthCurve == nil then
+    return false
+  end
+  return Core.HealthAlpha(unitAPI, unit, healthCurve)
+end
+
+-- DriveAlpha hands alpha (possibly secret) straight to part:SetAlpha under pcall; if that
+-- fails, the part is faded (name-only). True when alpha was applied.
+local function DriveAlpha(part, alpha)
+  local fn = Field(part, "SetAlpha")
+  if type(fn) == "function" and pcall(fn, part, alpha) then
+    return true
+  end
+  Method(part, "SetAlpha", 0)
+  return false
+end
+
+-- fullCurve: the opposite curve (Core.FULL_HEALTH_CURVE_POINTS), built once (fullBuilt) and only
+-- when a compact plate first shows a level with the health curve; nil if it cannot be.
+local fullCurve, fullBuilt = nil, false
+
+-- FullHealthAlpha returns true and the alpha the name with the level should have (0 while hurt,
+-- 1 at full health; secret where health is secret), or false when the client cannot give it.
+local function FullHealthAlpha(unit)
+  if not fullBuilt then
+    fullBuilt = true
+    fullCurve = Core.HealthCurve(unitAPI, Core.FULL_HEALTH_CURVE_POINTS)
+  end
+  if fullCurve == nil then
+    return false
+  end
+  return Core.HealthAlpha(unitAPI, unit, fullCurve)
+end
+
+-- FollowBar makes the "(level)" after the name of the compact plate follow its health bar
+-- (Core.LevelSuffix; nothing to do when ShowFullName drew no level there): Blizzard's bar shows
+-- the level beside it, so the suffix goes while the bar is shown and comes back at full health.
+-- With the curve, the name with the level gets FullHealthAlpha and the name alone (rec.short)
+-- the bar's alpha, both possibly secret, applied, never compared; if either cannot be applied,
+-- the suffix stays (name with the level at 1, the name alone at 0). Without the curve, the
+-- text is chosen from hurt. Only our own FontStrings are touched, never Blizzard's name.
+local function FollowBar(plate, unit, curve, alpha, barDriven, hurt)
+  local rec = labels[plate]
+  if not rec or not rec.full or not rec.short then
+    return
+  end
+  local mode = Core.LevelSuffix(curve and true or false, barDriven, hurt)
+  if mode == "curve" then
+    local ok, full = FullHealthAlpha(unit)
+    rec.text:SetText(rec.full)
+    if ok and DriveAlpha(rec.text, full) and DriveAlpha(rec.short, alpha) then
+      return
+    end
+    mode = "show"
+  end
+  rec.text:SetText(mode == "hide" and rec.plain or rec.full)
+  Method(rec.text, "SetAlpha", 1)
+  Method(rec.short, "SetAlpha", 0)
+end
+
+-- HealthBarParts returns UnitFrame's health bar parts (HealthBarsContainer, healthBar), the
+-- ones compact mode shows while the unit is hurt.
+local function HealthBarParts(uf)
+  local out = {}
+  for _, key in ipairs({ "HealthBarsContainer", "healthBar" }) do
+    local part = Field(uf, key)
+    if type(part) == "table" then
+      out[#out + 1] = part
+    end
+  end
+  return out
+end
+
+-- CompactParts returns the parts compact mode hides on a plate: for each ancestor of the name
+-- FontString up to UnitFrame, its other child frames and regions, except the health bar when
+-- showHealth (the unit is hurt). nil when there is no name, or the name is not inside
+-- UnitFrame (then nothing is hidden).
+local function CompactParts(plate, uf, showHealth)
+  local fs = FindName(uf)
+  if not fs then
+    return nil
+  end
+  local keep = { [fs] = true }
+  if showHealth then
+    for _, part in ipairs(HealthBarParts(uf)) do
+      keep[part] = true
+    end
+  end
+  local chain = {}
+  local node = fs
+  for _ = 1, MAX_DEPTH do
+    local parent = Method(node, "GetParent")
+    if type(parent) ~= "table" then
+      return nil
+    end
+    chain[#chain + 1] = parent
+    keep[parent] = true
+    if parent == uf then
+      break
+    end
+    node = parent
+  end
+  if chain[#chain] ~= uf then
+    return nil
+  end
+  local chevron = chevrons[plate]
+  if chevron then
+    keep[chevron] = true
+  end
+  if labels[plate] then
+    keep[labels[plate].frame] = true
+  end
+  local parts = {}
+  for _, ancestor in ipairs(chain) do
+    for _, getter in ipairs({ "GetChildren", "GetRegions" }) do
+      local list = Results(ancestor, getter)
+      if list then
+        for i = 1, list.n do
+          local part = list[i]
+          if type(part) == "table" and not keep[part] then
+            keep[part] = true
+            parts[#parts + 1] = part
+          end
+        end
+      end
+    end
+  end
+  return parts
+end
+
+-- OnPartShown fades a part out again when the game shows it, only while its plate is still
+-- in compact mode; a health bar part driven by the health curve gets the curve's alpha again.
+local function OnPartShown(part)
+  local plate = owners[part]
+  local rec = plate and hidden[plate]
+  if not rec or not rec.set[part] then
+    return
+  end
+  if rec.drive[part] then
+    local ok, alpha = HealthAlpha(rec.unit)
+    if ok then
+      DriveAlpha(part, alpha)
+      return
+    end
+  end
+  Method(part, "SetAlpha", 0)
+end
+
+local function HookPart(part)
+  if hooked[part] or type(Field(part, "HookScript")) ~= "function" then
+    return
+  end
+  local ok = Results(part, "HookScript", "OnShow", function(self)
+    SafeCall("OnShow hook", OnPartShown, self)
+  end)
+  if ok then
+    hooked[part] = true
+  end
+end
+
+-- Uncompact gives every part this addon faded on the plate its alpha back and forgets them.
+local function Uncompact(plate)
+  local rec = hidden[plate]
+  if not rec then
+    return
+  end
+  if not marks[plate] then
+    HideFullName(plate)
+    RestoreScales(plate)
+  end
+  hidden[plate] = nil
+  for _, part in ipairs(rec.list) do
+    owners[part] = nil
+    Method(part, "SetAlpha", 1)
+  end
+end
+
+-- Compact fades out every part of the plate but the name, and the health bar while unit is
+-- hurt (again on each call, so parts that appeared since, or whose alpha the game reset, are
+-- caught; a part no longer to hide, e.g. the health bar once hurt, gets its alpha back).
+-- The health bar's alpha comes from the health curve when the client has it (HealthAlpha: the
+-- alpha may be secret, so it is applied, never compared); else from Core.HealthMissing (the
+-- readable-health fallback: an unknown health keeps the plate name-only).
+-- Without a usable name, the plate keeps its default look.
+-- A friend's plate is marked (Mark, friend colour and chevron) before it is compacted: its name
+-- is then already ours, and stays so (the plate keeps the friend look) when compact cannot
+-- apply. level is the level shown after the name of an unmarked plate (see Level), or nil; on
+-- any compact plate, FollowBar then drops the suffix while the health bar is shown.
+local function Compact(plate, uf, unit, level)
+  local curve, alpha = HealthAlpha(unit)
+  local hurt = not curve and Core.HealthMissing(unitAPI, unit)
+  local marked = marks[plate] ~= nil
+  -- The full name first, so its frame exists when the parts to fade are listed (it is kept).
+  local fs = FindName(uf)
+  if fs and not marked then
+    local c = ReadColor(fs)
+    if c then
+      ShowFullName(plate, uf, fs, Factor("othersize"), c[1], c[2], c[3], 0, Gap("othernamegap"), level)
+    else
+      HideFullName(plate)
+    end
+  end
+  local parts = CompactParts(plate, uf, hurt)
+  if not parts then
+    Uncompact(plate)
+    if marked then
+      RestoreScales(plate)
+    else
+      HideFullName(plate)
+    end
+    return
+  end
+  ScaleBar(plate, uf, BarPart(uf), Factor("otherbarsize"))
+  local rec = hidden[plate]
+  if not rec then
+    rec = { set = {}, list = {}, drive = {} }
+    hidden[plate] = rec
+  end
+  rec.hurt, rec.curve, rec.unit = hurt, curve, unit
+  -- With the curve, the health bar parts compact would hide are driven by its alpha instead.
+  local drive = {}
+  if curve then
+    for _, part in ipairs(HealthBarParts(uf)) do
+      drive[part] = true
+    end
+  end
+  local wanted = {}
+  for _, part in ipairs(parts) do
+    wanted[part] = true
+  end
+  local list = {}
+  for _, part in ipairs(rec.list) do
+    if wanted[part] then
+      list[#list + 1] = part
+    else
+      rec.set[part], owners[part] = nil, nil
+      Method(part, "SetAlpha", 1)
+    end
+  end
+  rec.list = list
+  rec.drive = {}
+  -- barDriven: the curve's alpha reached every health bar part it was given (at least one), so
+  -- the bar is shown exactly while hurt (FollowBar).
+  local driven, barDriven = false, curve and true or false
+  for _, part in ipairs(parts) do
+    if not rec.set[part] then
+      rec.set[part] = true
+      rec.list[#rec.list + 1] = part
+      owners[part] = plate
+      HookPart(part)
+    end
+    if drive[part] then
+      rec.drive[part] = true
+      driven = true
+      if not DriveAlpha(part, alpha) then
+        barDriven = false
+      end
+    else
+      Method(part, "SetAlpha", 0)
+    end
+  end
+  FollowBar(plate, unit, curve, alpha, barDriven and driven, hurt)
+end
+
+-- ModeSettings is the saved settings the plate mode reads (not Blizzard's global `Settings`,
+-- which the options panel below uses).
+local function ModeSettings()
+  return type(db) == "table" and db or nil
+end
+
+-- Info returns Core.UnitInfo for unit.
+local function Info(unit)
+  return Core.UnitInfo(unitAPI, unit, ModeSettings())
+end
+
+-- Mode returns the plate mode of unit ("member", "friend", "class", "compact" or "default"),
+-- its relation ("member", "friend" or nil), see Core.PlateMode, and the info it was read from.
+local function Mode(unit)
+  local info = Info(unit)
+  local mode, relation = Core.PlateMode(info, ModeSettings())
+  return mode, relation, info
+end
+
+-- Level returns the level to show after unit's name (Core.UnitLevel: -1 or less for "??"), or
+-- nil when none is shown: showlevel off, not a friendly non-member player (Core.ShowsLevel,
+-- from info, see Info), or the level is not readable (then the name stays alone). Apply passes
+-- it to compact plates only.
+local function Level(unit, info)
+  if not Core.ShowsLevel(info, ModeSettings()) then
+    return nil
+  end
+  return Core.UnitLevel(unitAPI, unit)
+end
+
+-- ShowOtherName draws the name of an unmarked full plate (Blizzard's colour, at size) with our
+-- own FontString so it can be sized and moved; the rest of the plate stays Blizzard's. No level:
+-- the full plate's health bar shows Blizzard's. Without a readable colour, Blizzard's name stays
+-- as it is (size 1).
+local function ShowOtherName(uf, size)
+  local fs = FindName(uf)
+  local c = fs and ReadColor(fs)
+  if c then
+    ShowFullName(uf, uf, fs, size, c[1], c[2], c[3], 0, Gap("othernamegap"))
+  else
+    HideFullName(uf)
+  end
+end
+
+-- DefaultFullPlate sizes the unmarked full plate of another friendly player (compact off, or
+-- the target with compact on; Core.OtherSizes): our name at othersize and othernamegap (drawn
+-- only when the size is not 1 or the gap is not 0, else Blizzard's name stays; never with the
+-- level, which Blizzard's health bar shows), the health bar at
+-- otherbarsize. Any other plate (enemies, NPCs, unknown) gets its original scales back, so a
+-- pooled UnitFrame never keeps a friendly's bar size.
+local function DefaultFullPlate(uf, info)
+  if not Core.OtherSizes(info, ModeSettings()) then
+    RestoreScales(uf)
+    return
+  end
+  local size = OtherFactor("othersize")
+  if size ~= Core.DEFAULT_FACTOR or Gap("othernamegap") ~= Core.DEFAULT_GAP then
+    ShowOtherName(uf, size)
+  end
+  local bar = OtherFactor("otherbarsize")
+  if bar ~= Core.DEFAULT_FACTOR then
+    ScaleBar(uf, uf, BarPart(uf), bar)
+  else
+    RestoreScales(uf)
+  end
+end
+
+-- Apply gives the UnitFrame uf (both the key of the records and the frame) the mode of unit.
+-- restore is passed to Unmark: false when uf may now show another unit, whose colour Blizzard
+-- has set or will set (never restore an older colour over it).
+local function Apply(uf, unit, restore)
+  local mode, relation, info = Mode(unit)
+  local class = Core.NameColor(info, ModeSettings(), relation) == "class"
+  local level = Level(unit, info)
+  if mode == "member" then
+    Uncompact(uf)
+    Mark(uf, uf, MemberStyle())
+  elseif mode == "friend" then
+    -- Full plates never get the level: Blizzard's health bar shows it.
+    Uncompact(uf)
+    Mark(uf, uf, RelationStyle(relation, false))
+  elseif mode == "class" then
+    Uncompact(uf)
+    Mark(uf, uf, ClassStyle(info.classColor, false))
+  elseif mode == "compact" and (relation == "friend" or relation == "guild") then
+    -- Compact plates: the level, which Compact (FollowBar) drops while the health bar shows.
+    Mark(uf, uf, RelationStyle(relation, true, level))
+    Compact(uf, uf, unit)
+  elseif mode == "compact" and class then
+    Mark(uf, uf, ClassStyle(info.classColor, true, level))
+    Compact(uf, uf, unit)
+  elseif mode == "compact" then
+    Unmark(uf, restore)
+    Compact(uf, uf, unit, level)
+  else
+    Unmark(uf, restore)
+    Uncompact(uf)
+    -- A friendly non-member's full plate (compact off, or the target): our name for othersize
+    -- and othernamegap, otherbarsize on the health bar, never the level.
+    DefaultFullPlate(uf, info)
+  end
+end
+
+-- Refresh applies the mode of unit to one plate. restore is passed to Unmark. A plate without
+-- a readable UnitFrame (forbidden) is left in its default look, silently.
+-- The records are keyed by UnitFrame (see chevrons above): uf is both the key and the frame.
+-- ApplyAndSync applies the mode, then SyncName, which runs even when Apply raised an error
+-- (the error is raised again afterwards for SafeCall to report): Blizzard's name never stays
+-- faded on a plate we have just looked at unless our own name covers it.
+local function ApplyAndSync(uf, unit, restore)
+  local ok, err = pcall(Apply, uf, unit, restore)
+  SyncName(uf)
+  if not ok then
+    error(err, 0)
+  end
+end
+
+local function Refresh(plate, unit, restore)
+  local uf = type(plate) == "table" and UnitFrameOf(plate)
+  if not uf then
+    -- No UnitFrame (not acquired yet, or forbidden): nothing of ours can be on it. A pooled
+    -- UnitFrame is cleaned when it shows a unit again (OnUpdateName) or by RefreshAll.
+    return
+  end
+  ApplyAndSync(uf, unit, restore)
+end
+
+-- Forget unmarks and uncompacts a UnitFrame that no longer shows anything of ours.
+local function Forget(uf)
+  local ok, err = pcall(function()
+    Unmark(uf, true)
+    Uncompact(uf)
+    RestoreScales(uf)
+  end)
+  SyncName(uf)
+  if not ok then
+    error(err, 0)
+  end
+end
+
+-- PendingNames returns how many names are in fadedNames (covered or waiting for a retry).
+local function PendingNames()
+  local n = 0
+  for _ in pairs(fadedNames) do
+    n = n + 1
+  end
+  return n
+end
+
+-- RestoreFadedNames gives alpha 1 back to every name still in fadedNames that our own name does
+-- not cover (a failed SetAlpha(1) earlier, or a UnitFrame no longer on any plate).
+local function RestoreFadedNames()
+  local covered = {}
+  for _, rec in pairs(labels) do
+    if rec.name then
+      covered[rec.name] = true
+    end
+  end
+  local pending = {}
+  for fs in pairs(fadedNames) do
+    if not covered[fs] then
+      pending[#pending + 1] = fs
+    end
+  end
+  for _, fs in ipairs(pending) do
+    RestoreName(fs)
+  end
+end
+
+-- RefreshAll refreshes every visible plate, and resets the plates no longer visible.
+local function RefreshAll()
+  local seen = {}
+  if type(C_NamePlate) == "table" then
+    local plates = Try(C_NamePlate.GetNamePlates)
+    if type(plates) == "table" then
+      for _, plate in ipairs(plates) do
+        local uf = UnitFrameOf(plate)
+        if uf then
+          seen[uf] = true
+        end
+        SafeCall("refresh plate", Refresh, plate, PlateUnit(plate), true)
+      end
+    end
+  end
+  -- UnitFrames not shown by any plate (back in Blizzard's pool) lose everything of ours.
+  local stale = {}
+  for _, tracked in ipairs({ marks, hidden, labels, bars, scaled }) do
+    for uf in pairs(tracked) do
+      if not seen[uf] then
+        seen[uf] = true
+        stale[#stale + 1] = uf
+      end
+    end
+  end
+  for _, uf in ipairs(stale) do
+    SafeCall("unmark plate", Forget, uf)
+  end
+  SafeCall("restore names", RestoreFadedNames)
+end
+
+-- OnUpdateName re-applies the colour after Blizzard recoloured a group member's name, and
+-- re-checks compact mode (parts may have appeared or been reset).
+local function OnUpdateName(frame)
+  if not Enabled() or type(frame) ~= "table" then
+    return
+  end
+  local unit = Field(frame, "unit")
+  if not IsNameplateUnit(unit) then
+    return
+  end
+  local plate = PlateForUnit(unit)
+  if type(plate) ~= "table" or UnitFrameOf(plate) ~= frame then
+    return
+  end
+  -- Blizzard has just coloured this name: a marked plate gets our colour back, an unmarked
+  -- one drops a leftover mark without restoring an older colour over it. Also what this
+  -- UnitFrame may carry from its previous plate (it comes from a pool): Blizzard's name faded
+  -- under our own, our chevron. The colour is Blizzard's new one.
+  ApplyAndSync(frame, unit, false)
+end
+
+local function FriendlyPlatesOff()
+  local value
+  if type(C_CVar) == "table" then
+    value = Try(C_CVar.GetCVar, "nameplateShowFriends")
+  end
+  if value == nil then
+    value = Try(GetCVar, "nameplateShowFriends")
+  end
+  return value == "0"
+end
+
+-- ---------------------------------------------------------------------------------------
+-- Settings: the one place that validates (through Core), saves and refreshes. Both the slash
+-- commands and the options panel call these. Each returns true when it changed the setting,
+-- false (nothing changed) when the value is invalid.
+
+local RefreshPanel -- set once the options panel exists
+
+local function Changed()
+  RefreshAll()
+  if RefreshPanel then
+    SafeCall("options panel refresh", RefreshPanel)
+  end
+end
+
+-- SetEnabled takes true/false or the text "on"/"off".
+local function SetEnabled(value)
+  if type(db) ~= "table" then
+    return false
+  end
+  if type(value) == "string" then
+    value = Core.ParseOnOff(value)
+  end
+  if type(value) ~= "boolean" then
+    return false
+  end
+  db.enabled = value
+  Changed()
+  return true
+end
+
+-- SetCompact takes true/false or the text "on"/"off".
+local function SetCompact(value)
+  if type(db) ~= "table" then
+    return false
+  end
+  if type(value) == "string" then
+    value = Core.ParseOnOff(value)
+  end
+  if type(value) ~= "boolean" then
+    return false
+  end
+  db.compact = value
+  Changed()
+  return true
+end
+
+-- SetColor takes r, g, b in 0..1.
+local function SetColor(r, g, b)
+  if type(db) ~= "table" or not Core.ValidColor({ r, g, b }) then
+    return false
+  end
+  db.color = { r, g, b }
+  Changed()
+  return true
+end
+
+-- SetFriendColor takes r, g, b in 0..1.
+local function SetFriendColor(r, g, b)
+  if type(db) ~= "table" or not Core.ValidColor({ r, g, b }) then
+    return false
+  end
+  db.friendcolor = { r, g, b }
+  Changed()
+  return true
+end
+
+-- SetGuildColor takes r, g, b in 0..1.
+local function SetGuildColor(r, g, b)
+  if type(db) ~= "table" or not Core.ValidColor({ r, g, b }) then
+    return false
+  end
+  db.guildcolor = { r, g, b }
+  Changed()
+  return true
+end
+
+-- SetFlag sets one of FLAG_DEFAULTS from true/false or the text "on"/"off".
+local function SetFlag(kind, value)
+  if type(db) ~= "table" or FLAG_DEFAULTS[kind] == nil then
+    return false
+  end
+  if type(value) == "string" then
+    value = Core.ParseOnOff(value)
+  end
+  if type(value) ~= "boolean" then
+    return false
+  end
+  db[kind] = value
+  Changed()
+  return true
+end
+
+-- FACTOR_KINDS are the size settings SetFactor accepts.
+local FACTOR_KINDS = {
+  chevsize = true, textsize = true, othersize = true, barsize = true, buffsize = true, otherbarsize = true,
+}
+
+-- SetFactor sets one of FACTOR_KINDS from a number (the panel's slider) or a
+-- text (the slash command).
+local function SetFactor(kind, value)
+  if type(db) ~= "table" or not FACTOR_KINDS[kind] then
+    return false
+  end
+  local f
+  if type(value) == "string" then
+    f = Core.ParseFactor(value, kind)
+  else
+    f = Core.SnapFactor(value, kind)
+  end
+  if not f then
+    return false
+  end
+  db[kind] = f
+  Changed()
+  return true
+end
+
+-- SetGap sets one of Core.GAP_KINDS (namegap, othernamegap) from a number (the panel's slider,
+-- rounded to a whole point) or a text (the slash command, a whole number). Out of range or
+-- invalid: refused, nothing changes.
+local function SetGap(kind, value)
+  if type(db) ~= "table" or not Core.GAP_KINDS[kind] then
+    return false
+  end
+  local n
+  if type(value) == "string" then
+    n = Core.ParseGap(value)
+  else
+    n = Core.SnapGap(value)
+  end
+  if not n then
+    return false
+  end
+  db[kind] = n
+  Changed()
+  return true
+end
+
+-- SetFont sets the font of our own name labels from a key of Core.FONTS (the panel's button,
+-- /gchev font). Anything else is refused and changes nothing.
+local function SetNameFont(key)
+  if type(db) ~= "table" or not Core.ValidFont(key) then
+    return false
+  end
+  db.font = key
+  Changed()
+  return true
+end
+
+-- ResetColor puts the default colour back (/gchev reset).
+local function ResetColor()
+  if type(db) ~= "table" then
+    return false
+  end
+  db.color = Core.CopyDefaultColor()
+  Changed()
+  return true
+end
+
+-- ResetAll puts every setting back to its default (the panel's button).
+local function ResetAll()
+  if type(db) ~= "table" then
+    return false
+  end
+  db.enabled = true
+  db.compact = true
+  db.color = Core.CopyDefaultColor()
+  db.friendcolor = Core.CopyDefaultFriendColor()
+  db.friendchevron = true
+  db.bnetfriends = true
+  db.guildcolor = Core.CopyDefaultGuildColor()
+  db.guildchevron = true
+  db.classcolor = false
+  db.showlevel = true
+  db.chevsize = Core.DEFAULT_FACTOR
+  db.textsize = Core.DEFAULT_FACTOR
+  db.othersize = Core.DEFAULT_FACTOR
+  db.barsize = Core.DEFAULT_FACTOR
+  db.buffsize = Core.DEFAULT_FACTOR
+  db.otherbarsize = Core.DEFAULT_FACTOR
+  db.namegap = Core.DEFAULT_GAP
+  db.othernamegap = Core.DEFAULT_GAP
+  db.font = Core.DEFAULT_FONT
+  Changed()
+  return true
+end
+
+-- ---------------------------------------------------------------------------------------
+-- Options panel (Options -> AddOns -> GroupChevron). Plain widgets on our own canvas, shown
+-- only when the client has the Settings canvas API; otherwise the slash commands are all there
+-- is, silently.
+
+local category -- the registered Settings category, to open it with /gchev options
+
+-- L returns the options text of key in the client's language (English for any other locale
+-- or key missing from it; never an error, also without GetLocale).
+local function L(key)
+  local locale
+  if type(GetLocale) == "function" then
+    local ok, v = pcall(GetLocale)
+    if ok then
+      locale = v
+    end
+  end
+  return Core.Translate(locale, key)
+end
+
+local function BuildPanel()
+  if type(Settings) ~= "table" or type(Settings.RegisterCanvasLayoutCategory) ~= "function"
+    or type(Settings.RegisterAddOnCategory) ~= "function" or type(CreateFrame) ~= "function" then
+    return
+  end
+  local panel = CreateFrame("Frame", nil, nil)
+  panel.name = "GroupChevron"
+  local refreshing = false -- true while the controls are set from the saved values
+
+  -- The content is taller than the Settings window: it lives in a scroll frame (scroll bar on
+  -- the right, 28 px margin) and every widget below is a child of `content`.
+  local scroll = CreateFrame("ScrollFrame", nil, panel, "UIPanelScrollFrameTemplate")
+  scroll:SetPoint("TOPLEFT", panel, "TOPLEFT", 0, -4)
+  scroll:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -28, 4)
+  local content = CreateFrame("Frame", nil, scroll)
+  content:SetSize(600, 840)
+  scroll:SetScrollChild(content)
+
+  local function Label(text, x, y, template)
+    local fs = content:CreateFontString(nil, "ARTWORK", template or "GameFontHighlight")
+    fs:SetPoint("TOPLEFT", content, "TOPLEFT", x, y)
+    fs:SetText(text)
+    return fs
+  end
+
+  Label("GroupChevron", 16, -16, "GameFontNormalLarge")
+
+  local function Checkbox(text, y, onClick, x)
+    x = x or 16
+    local cb = CreateFrame("CheckButton", nil, content, "UICheckButtonTemplate")
+    cb:SetPoint("TOPLEFT", content, "TOPLEFT", x, y)
+    Label(text, x + 32, y - 6)
+    cb:SetScript("OnClick", function(self)
+      if refreshing then
+        return
+      end
+      SafeCall("options checkbox", function()
+        onClick(self:GetChecked() and true or false)
+      end)
+    end)
+    return cb
+  end
+
+  -- Swatch adds a colour swatch at y that opens the colour picker on get()'s colour (live
+  -- apply through set, Cancel restores the previous colour) and returns its fill texture.
+  local function Swatch(y, get, set, command)
+    local swatch = CreateFrame("Button", nil, content)
+    swatch:SetSize(24, 24)
+    swatch:SetPoint("TOPLEFT", content, "TOPLEFT", 160, y)
+    local border = swatch:CreateTexture(nil, "BACKGROUND")
+    border:SetAllPoints(swatch)
+    border:SetColorTexture(1, 1, 1, 1)
+    local fill = swatch:CreateTexture(nil, "ARTWORK")
+    fill:SetPoint("TOPLEFT", swatch, "TOPLEFT", 2, -2)
+    fill:SetPoint("BOTTOMRIGHT", swatch, "BOTTOMRIGHT", -2, 2)
+    swatch:SetScript("OnClick", function()
+      SafeCall("options colour picker", function()
+        if type(ColorPickerFrame) ~= "table" or type(ColorPickerFrame.SetupColorPickerAndShow) ~= "function" then
+          Print("the colour picker is not available: use /gchev " .. command .. " #RRGGBB")
+          return
+        end
+        local pr, pg, pb = get()
+        ColorPickerFrame:SetupColorPickerAndShow({
+          r = pr,
+          g = pg,
+          b = pb,
+          hasOpacity = false,
+          swatchFunc = function()
+            SafeCall("options colour apply", function()
+              local r, g, b = ColorPickerFrame:GetColorRGB()
+              set(r, g, b)
+            end)
+          end,
+          cancelFunc = function()
+            SafeCall("options colour cancel", set, pr, pg, pb)
+          end,
+        })
+      end)
+    end)
+    return fill
+  end
+
+  -- Group draws a thin titled frame (x 8..592) from y (its top edge) down `height` px, under
+  -- the widgets of one option group, and puts the group's title just inside its top edge. It
+  -- is created before the group's controls so they sit on top. A client without
+  -- BackdropTemplate / SetBackdrop gets four 1 px texture lines instead; nothing here errors.
+  local BORDER = { 0.5, 0.5, 0.5, 0.8 }
+  local function Group(title, y, height)
+    local ok, box = pcall(CreateFrame, "Frame", nil, content, "BackdropTemplate")
+    if not ok or type(box) ~= "table" then
+      ok, box = pcall(CreateFrame, "Frame", nil, content)
+    end
+    if ok and type(box) == "table" then
+      box:SetSize(584, height)
+      box:SetPoint("TOPLEFT", content, "TOPLEFT", 8, y)
+      local done = false
+      if type(box.SetBackdrop) == "function" and type(box.SetBackdropBorderColor) == "function" then
+        done = pcall(function()
+          box:SetBackdrop({ edgeFile = "Interface\\Buttons\\WHITE8x8", edgeSize = 1 })
+          box:SetBackdropBorderColor(BORDER[1], BORDER[2], BORDER[3], BORDER[4])
+        end)
+      end
+      if not done and type(box.CreateTexture) == "function" then
+        local function Line(p1, p2, w, h)
+          local t = box:CreateTexture(nil, "BORDER")
+          t:SetColorTexture(BORDER[1], BORDER[2], BORDER[3], BORDER[4])
+          t:SetPoint(p1, box, p1, 0, 0)
+          t:SetPoint(p2, box, p2, 0, 0)
+          if w then
+            t:SetWidth(w)
+          end
+          if h then
+            t:SetHeight(h)
+          end
+        end
+        Line("TOPLEFT", "TOPRIGHT", nil, 1)
+        Line("BOTTOMLEFT", "BOTTOMRIGHT", nil, 1)
+        Line("TOPLEFT", "BOTTOMLEFT", 1, nil)
+        Line("TOPRIGHT", "BOTTOMRIGHT", 1, nil)
+      end
+    end
+    return Label(title, 16, y - 8, "GameFontNormal")
+  end
+
+  Group(L("group_members"), -84, 272)
+  Group(L("friendlies"), -366, 190)
+  Group(L("friends"), -566, 102)
+  Group(L("guildmates"), -678, 102)
+
+  -- Layout: Enabled, then the "Group members" settings, then the "Friendlies" ones
+  -- (friendly players outside the group), then the "Friends" ones (friends list, outside the
+  -- group), then the "Guildmates" ones (in your guild, outside the group), then Reset. The specs find widgets
+  -- by creation order, so the Friends widgets, then the guild chevron checkbox, then the class
+  -- colour checkbox are created last.
+  local enabledBox = Checkbox(L("enabled"), -48, SetEnabled)
+  local compactBox = Checkbox(L("compact"), -398, SetCompact)
+
+  -- Name colour: a swatch that opens the colour picker (live apply, Cancel restores).
+  Label(L("name_colour"), 16, -124)
+  local fill = Swatch(-118, Color, SetColor, "color")
+
+  -- Sliders: the value label follows the drag, the setting is applied on release (or at once
+  -- when changed without dragging, e.g. the mouse wheel), so a drag does not spam RefreshAll.
+  -- A size slider (Core factors, 0.05 steps, SetFactor) or, for a kind of Core.GAP_KINDS, a
+  -- name gap slider (whole points, SetGap).
+  local function Slider(text, y, kind)
+    local isGap = Core.GAP_KINDS[kind] == true
+    local min, max, step = Core.MIN_FACTOR, Core.MaxFactor(kind), 0.05
+    local fmt, default, set = "%.2f", Core.DEFAULT_FACTOR, SetFactor
+    local function snap(v)
+      return Core.SnapFactor(v, kind)
+    end
+    if isGap then
+      min, max, step = Core.MIN_GAP, Core.MAX_GAP, 1
+      fmt, default, set, snap = "%d", Core.DEFAULT_GAP, SetGap, Core.SnapGap
+    end
+    Label(text, 16, y)
+    local s = CreateFrame("Slider", nil, content, "OptionsSliderTemplate")
+    s:SetPoint("TOPLEFT", content, "TOPLEFT", 160, y - 4)
+    s:SetWidth(220)
+    s:SetMinMaxValues(min, max)
+    s:SetValueStep(step)
+    if type(s.SetObeyStepOnDrag) == "function" then
+      s:SetObeyStepOnDrag(true)
+    end
+    local valueText = Label("", 392, y)
+    local dragging = false
+    local function Show(v)
+      valueText:SetText(string.format(fmt, snap(v) or default))
+    end
+    s:SetScript("OnValueChanged", function(_, v)
+      if refreshing then
+        return
+      end
+      SafeCall("options slider", function()
+        Show(v)
+        if not dragging then
+          set(kind, v)
+        end
+      end)
+    end)
+    s:SetScript("OnMouseDown", function()
+      dragging = true
+    end)
+    s:SetScript("OnMouseUp", function()
+      dragging = false
+      SafeCall("options slider release", function()
+        set(kind, s:GetValue())
+      end)
+    end)
+    return s, Show
+  end
+
+  -- Created in this order (the specs find sliders by creation order); placed by section.
+  local sliders = {
+    { "chevsize", Slider(L("chevron_size"), -164, "chevsize") },
+    { "textsize", Slider(L("text_size"), -204, "textsize") },
+    { "othersize", Slider(L("text_size"), -440, "othersize") },
+    { "barsize", Slider(L("bar_size"), -244, "barsize") },
+    { "buffsize", Slider(L("buffs_size"), -284, "buffsize") },
+    { "otherbarsize", Slider(L("bar_size"), -480, "otherbarsize") },
+    { "namegap", Slider(L("name_gap"), -324, "namegap") },
+    { "othernamegap", Slider(L("name_gap"), -520, "othernamegap") },
+  }
+
+  local reset = CreateFrame("Button", nil, content, "UIPanelButtonTemplate")
+  reset:SetSize(160, 24)
+  reset:SetPoint("TOPLEFT", content, "TOPLEFT", 16, -796)
+  reset:SetText(L("reset"))
+  reset:SetScript("OnClick", function()
+    SafeCall("options reset", ResetAll)
+  end)
+
+  -- Friends (on your friends list, outside your group).
+  Label(L("name_colour"), 16, -606)
+  local friendFill = Swatch(-600, FriendColor, SetFriendColor, "friendcolor")
+  local friendChevronBox = Checkbox(L("show_chevron"), -628, function(v) SetFlag("friendchevron", v) end)
+  local bnetBox = Checkbox(L("bnet_friends"), -628, function(v) SetFlag("bnetfriends", v) end, 200)
+
+  -- Guildmates (in your guild, outside your group, not on your friends list).
+  Label(L("name_colour"), 16, -718)
+  local guildFill = Swatch(-712, GuildColor, SetGuildColor, "guildcolor")
+  local guildChevronBox = Checkbox(L("show_chevron"), -740, function(v) SetFlag("guildchevron", v) end)
+
+  -- Friendlies: the class colour, beside "Compact plates".
+  local classBox = Checkbox(L("class_colour"), -398, function(v) SetFlag("classcolor", v) end, 260)
+  -- Friendlies: show level, beside "Class colour" (created last, see above).
+  local levelBox = Checkbox(L("show_level"), -398, function(v) SetFlag("showlevel", v) end, 440)
+
+  -- Name font: a drop-down listing Core.FONTS, beside the name colour of the group members.
+  -- Without the client's UIDropDownMenu API it falls back to a button that cycles through them.
+  -- Created last: the specs find buttons by creation order.
+  Label(L("name_font"), 260, -124)
+  local function CurrentFont()
+    return Core.FindFont(type(db) == "table" and db.font) or Core.FONTS[1]
+  end
+  local ShowFont
+  local dropOk = pcall(function()
+    if type(UIDropDownMenu_Initialize) ~= "function" or type(UIDropDownMenu_AddButton) ~= "function"
+      or type(UIDropDownMenu_SetText) ~= "function" then
+      error("no drop-down API")
+    end
+    local drop = CreateFrame("Frame", nil, content, "UIDropDownMenuTemplate")
+    drop:SetPoint("TOPLEFT", content, "TOPLEFT", 340, -118)
+    if type(UIDropDownMenu_SetWidth) == "function" then
+      UIDropDownMenu_SetWidth(drop, 160)
+    end
+    UIDropDownMenu_Initialize(drop, function()
+      local current = CurrentFont()
+      for _, f in ipairs(Core.FONTS) do
+        local info = type(UIDropDownMenu_CreateInfo) == "function" and UIDropDownMenu_CreateInfo() or {}
+        info.text = f.label
+        info.checked = f == current
+        info.func = function()
+          SafeCall("options font", function()
+            SetNameFont(f.key)
+            ShowFont()
+          end)
+        end
+        UIDropDownMenu_AddButton(info)
+      end
+    end)
+    ShowFont = function()
+      UIDropDownMenu_SetText(drop, CurrentFont().label)
+    end
+  end)
+  if not dropOk then
+    local fontButton = CreateFrame("Button", nil, content, "UIPanelButtonTemplate")
+    fontButton:SetSize(200, 24)
+    fontButton:SetPoint("TOPLEFT", content, "TOPLEFT", 360, -118)
+    ShowFont = function()
+      fontButton:SetText(CurrentFont().label)
+    end
+    fontButton:SetScript("OnClick", function()
+      SafeCall("options font", function()
+        SetNameFont(Core.NextFont(type(db) == "table" and db.font))
+        ShowFont()
+      end)
+    end)
+  end
+
+  -- Reads the saved settings into the controls.
+  RefreshPanel = function()
+    refreshing = true
+    local ok, err = pcall(function()
+      ShowFont()
+      enabledBox:SetChecked(Enabled())
+      compactBox:SetChecked(type(db) == "table" and db.compact == true)
+      fill:SetColorTexture(Color())
+      friendFill:SetColorTexture(FriendColor())
+      friendChevronBox:SetChecked(Flag("friendchevron"))
+      bnetBox:SetChecked(Flag("bnetfriends"))
+      guildFill:SetColorTexture(GuildColor())
+      guildChevronBox:SetChecked(Flag("guildchevron"))
+      classBox:SetChecked(Flag("classcolor"))
+      levelBox:SetChecked(Flag("showlevel"))
+      for _, sl in ipairs(sliders) do
+        local v = Core.GAP_KINDS[sl[1]] and Gap(sl[1]) or Factor(sl[1])
+        sl[2]:SetValue(v)
+        sl[3](v)
+      end
+    end)
+    refreshing = false
+    if not ok then
+      error(err, 0)
+    end
+  end
+  panel:SetScript("OnShow", function()
+    SafeCall("options panel show", RefreshPanel)
+  end)
+
+  local cat = Settings.RegisterCanvasLayoutCategory(panel, "GroupChevron")
+  Settings.RegisterAddOnCategory(cat)
+  category = cat
+end
+
+-- OpenOptions opens the panel (/gchev options). It may be refused in combat: never an error.
+local function OpenOptions()
+  if not category or type(Settings) ~= "table" or type(Settings.OpenToCategory) ~= "function" then
+    Print("the options panel is not available on this client: use the /gchev commands")
+    return
+  end
+  local id = Method(category, "GetID")
+  if id == nil or not pcall(Settings.OpenToCategory, id) then
+    Print("could not open the options panel (in combat?): try again out of combat")
+  end
+end
+
+-- ---------------------------------------------------------------------------------------
+-- Blizzard's nameplate driver
+--
+-- The NAME_PLATE_UNIT_ADDED / REMOVED handlers alone cannot follow the pooled UnitFrames:
+-- they run before or after Blizzard's own (event order between frames is not guaranteed), so
+-- at REMOVED the plate may have already given its UnitFrame back (nothing to clean: it goes to
+-- the pool with Blizzard's name still faded) and at ADDED it may not have one yet. And
+-- Blizzard does not call CompactUnitFrame_UpdateName when it gives a UnitFrame a unit
+-- (CompactUnitFrame_UpdateAll skips it for units), so the 0.6.2 clean-up in that hook did not
+-- always run: enemies without a name again, until the next RefreshAll. Post-hooks on the
+-- driver run at the right moment:
+--   - ReleaseUnitFrame(base): the driver gives base.UnitFrame back to the pool (base keeps it
+--     until the driver returns): everything of ours on it is undone first;
+--   - OnNamePlateAdded(token): the plate has acquired its UnitFrame and set the unit: its mode
+--     is applied, which also undoes anything left on that UnitFrame.
+
+local function OnUnitFrameReleased(base)
+  local uf = UnitFrameOf(base)
+  if uf then
+    Forget(uf)
+  end
+end
+
+local function OnNamePlateAdded(token)
+  token = Readable(token)
+  if IsNameplateUnit(token) then
+    Refresh(PlateForUnit(token), token, false)
+  end
+end
+
+-- driverHooks: which driver hooks are installed, and how often each ran (for /gchev debug: if
+-- a name goes missing again, this tells whether they run on the Forever client at all).
+local driverHooks = { release = false, added = false, releaseCalls = 0, addedCalls = 0 }
+
+local function HookDriver()
+  local driver = _G.NamePlateDriverFrame
+  if type(hooksecurefunc) ~= "function" or type(driver) ~= "table" then
+    return
+  end
+  if type(Field(driver, "ReleaseUnitFrame")) == "function" then
+    hooksecurefunc(driver, "ReleaseUnitFrame", function(_, base)
+      driverHooks.releaseCalls = driverHooks.releaseCalls + 1
+      SafeCall("ReleaseUnitFrame hook", OnUnitFrameReleased, base)
+    end)
+    driverHooks.release = true
+  end
+  if type(Field(driver, "OnNamePlateAdded")) == "function" then
+    hooksecurefunc(driver, "OnNamePlateAdded", function(_, token)
+      driverHooks.addedCalls = driverHooks.addedCalls + 1
+      SafeCall("OnNamePlateAdded hook", OnNamePlateAdded, token)
+    end)
+    driverHooks.added = true
+  end
+end
+
+-- ---------------------------------------------------------------------------------------
+-- Events
+
+local handlers = {}
+
+function handlers.ADDON_LOADED(name)
+  if name ~= addonName then
+    return
+  end
+  GroupChevronDB = Core.InitDB(GroupChevronDB)
+  db = GroupChevronDB
+  SafeCall("options panel", BuildPanel)
+  if type(hooksecurefunc) == "function" and type(CompactUnitFrame_UpdateName) == "function" then
+    hooksecurefunc("CompactUnitFrame_UpdateName", function(frame)
+      SafeCall("CompactUnitFrame_UpdateName hook", OnUpdateName, frame)
+    end)
+  end
+  SafeCall("nameplate driver hooks", HookDriver)
+end
+
+function handlers.PLAYER_ENTERING_WORLD()
+  if FriendlyPlatesOff() then
+    NoticeOnce("friendsoff", "friendly player nameplates are off (V / Shift+V): group members cannot be marked")
+  end
+  RefreshAll()
+end
+
+function handlers.GROUP_ROSTER_UPDATE()
+  RefreshAll()
+end
+
+-- Leaving combat: one more chance for any name whose SetAlpha(1) failed (see RestoreName).
+function handlers.PLAYER_REGEN_ENABLED()
+  RefreshAll()
+end
+
+-- The old and the new target both change mode (a non-member target shows its full plate).
+function handlers.PLAYER_TARGET_CHANGED()
+  RefreshAll()
+end
+
+function handlers.NAME_PLATE_UNIT_ADDED(unit)
+  unit = Readable(unit)
+  -- A recycled plate may still be marked for the unit it showed before: never restore that
+  -- unit's colour over the new one.
+  Refresh(PlateForUnit(unit), unit, false)
+end
+
+-- A compact plate shows its health bar while the unit is hurt. With the health curve, its
+-- alpha (which may be secret, so it cannot be compared with the last one) is applied again on
+-- every health event, and so are the alphas of the name with and without the "(level)" suffix
+-- (FollowBar); if the curve fails now, the plate is compacted again (fallback). With the
+-- readable-health fallback, the plate is re-checked when the health crosses "full" either way
+-- (nothing to do for other plates, or no change), which also switches the suffix (Compact).
+local function OnHealth(unit)
+  unit = Readable(unit)
+  if not Enabled() or not IsNameplateUnit(unit) then
+    return
+  end
+  local plate = PlateForUnit(unit)
+  local uf = type(plate) == "table" and UnitFrameOf(plate)
+  local rec = uf and hidden[uf]
+  if not rec then
+    return
+  end
+  if rec.curve then
+    local ok, alpha = HealthAlpha(unit)
+    if ok and rec.unit == unit then
+      local driven, barDriven = false, true
+      for _, part in ipairs(rec.list) do
+        if rec.drive[part] then
+          driven = true
+          if not DriveAlpha(part, alpha) then
+            barDriven = false
+          end
+        end
+      end
+      -- The "(level)" suffix follows the bar (its alpha cannot be compared with the last one).
+      FollowBar(uf, unit, true, alpha, barDriven and driven, false)
+      return
+    end
+  elseif rec.hurt == Core.HealthMissing(unitAPI, unit) then
+    return
+  end
+  local info = Info(unit)
+  if Core.PlateMode(info, ModeSettings()) == "compact" then
+    Compact(uf, uf, unit, Level(unit, info))
+  end
+end
+
+handlers.UNIT_HEALTH = OnHealth
+handlers.UNIT_MAXHEALTH = OnHealth
+
+-- The level shown after a friendly player's name: re-applied when it changes (a level-up, or
+-- the client learning a level it reported as unknown).
+function handlers.UNIT_LEVEL(unit)
+  unit = Readable(unit)
+  if not Enabled() or not IsNameplateUnit(unit) then
+    return
+  end
+  Refresh(PlateForUnit(unit), unit, true)
+end
+
+-- Friend lists: the plates are re-checked when the character or Battle.net friends list
+-- changes. BN_FRIEND_INFO_CHANGED can fire often, so a burst gives one RefreshAll, at most
+-- every FRIEND_REFRESH_DELAY seconds (C_Timer.After; without it, at once).
+local FRIEND_REFRESH_DELAY = 0.2
+local friendRefreshPending = false
+
+local function FriendRefreshNow()
+  friendRefreshPending = false
+  SafeCall("friend list refresh", RefreshAll)
+end
+
+local function ScheduleFriendRefresh()
+  if friendRefreshPending then
+    return
+  end
+  local after = Field(C_Timer, "After")
+  if type(after) == "function" then
+    friendRefreshPending = true
+    if pcall(after, FRIEND_REFRESH_DELAY, FriendRefreshNow) then
+      return
+    end
+    friendRefreshPending = false
+  end
+  RefreshAll()
+end
+
+for _, event in ipairs({ "FRIENDLIST_UPDATE", "BN_FRIEND_LIST_SIZE_CHANGED", "BN_FRIEND_INFO_CHANGED",
+  "BN_FRIEND_ACCOUNT_ONLINE", "BN_FRIEND_ACCOUNT_OFFLINE" }) do
+  handlers[event] = ScheduleFriendRefresh
+end
+
+-- Guild changes (joined, left, roster) use the same coalesced refresh. GUILD_ROSTER_UPDATE can
+-- fire often; a client without one of these events just fails its pcall RegisterEvent below.
+for _, event in ipairs({ "PLAYER_GUILD_UPDATE", "GUILD_ROSTER_UPDATE" }) do
+  handlers[event] = ScheduleFriendRefresh
+end
+
+function handlers.NAME_PLATE_UNIT_REMOVED(unit)
+  local plate = PlateForUnit(Readable(unit))
+  local uf = type(plate) == "table" and UnitFrameOf(plate)
+  if uf then
+    Forget(uf)
+  end
+end
+
+if type(CreateFrame) == "function" then
+  local frame = CreateFrame("Frame")
+  for event in pairs(handlers) do
+    pcall(frame.RegisterEvent, frame, event)
+  end
+  frame:SetScript("OnEvent", function(_, event, ...)
+    local handler = handlers[event]
+    if handler then
+      SafeCall(event, handler, ...)
+    end
+  end)
+end
+
+-- ---------------------------------------------------------------------------------------
+-- /gchev
+
+-- SOURCE_NAMES are the friend sources of Core.FriendLookup, as /gchev prints them.
+local SOURCE_NAMES = {
+  list = "character list",
+  bnet = "Battle.net",
+  none = "none",
+  noguid = "no readable GUID",
+  missing = "API missing",
+}
+
+-- FriendText says whether unit counts as a friend outside the group, and which source
+-- answered, e.g. "target friend: yes (character list)".
+local function FriendText(unit, what)
+  local info = Info(unit)
+  local yes = Core.Relation(info, ModeSettings()) == "friend"
+  return string.format("%s friend: %s (%s)", what, yes and "yes" or "no",
+    SOURCE_NAMES[info.source] or tostring(info.source))
+end
+
+-- GUILD_SOURCE_NAMES are the sources of Core.GuildLookup, as /gchev prints them.
+local GUILD_SOURCE_NAMES = {
+  unit = "UnitIsInMyGuild",
+  guid = "IsPlayerInGuildFromGUID",
+  none = "none",
+  noguild = "not in a guild",
+  noguid = "no readable GUID",
+  missing = "API missing",
+}
+
+-- GuildText says whether unit counts as a guildmate (outside the group, not a friend), and
+-- which API answered, e.g. "target guildmate: yes (UnitIsInMyGuild)".
+local function GuildText(unit, what)
+  local info = Info(unit)
+  local yes = Core.Relation(info, ModeSettings()) == "guild"
+  return string.format("%s guildmate: %s (%s)", what, yes and "yes" or "no",
+    GUILD_SOURCE_NAMES[info.guildSource] or tostring(info.guildSource))
+end
+
+-- ClassText gives unit's class token and class colour, and the colour its name gets, e.g.
+-- "class MAGE, class colour #3FC7EB (classcolor on), name colour: class #3FC7EB".
+local function ClassText(unit)
+  local token, r, g, b = Core.ClassColor(unitAPI, unit)
+  local info = Info(unit)
+  local settings = ModeSettings()
+  local _, relation = Core.PlateMode(info, settings)
+  local which = Core.NameColor(info, settings, relation)
+  local name = "Blizzard's"
+  if which == "member" then
+    name = "member " .. Core.FormatColor(Color())
+  elseif which == "friend" then
+    name = "friend " .. Core.FormatColor(FriendColor())
+  elseif which == "guild" then
+    name = "guild " .. Core.FormatColor(GuildColor())
+  elseif which == "class" then
+    name = "class " .. Core.FormatColor(unpack(info.classColor))
+  end
+  return string.format("class %s, class colour %s (classcolor %s), name colour: %s", token or "unknown",
+    r and Core.FormatColor(r, g, b) or "none", Flag("classcolor") and "on" or "off", name)
+end
+
+local function SlashStatus()
+  if not db then
+    Print("not initialised yet")
+    return
+  end
+  local field = "not checked yet (no group member's plate seen)"
+  if lastNameField == "" then
+    field = "not found (chevron only)"
+  elseif lastNameField then
+    field = "UnitFrame." .. lastNameField
+  end
+  local n, friends, guildmates, classes = 0, 0, 0, 0
+  for _, m in pairs(marks) do
+    if m.kind == "member" then
+      n = n + 1
+    elseif m.kind == "guild" or m.kind == "guildcompact" then
+      guildmates = guildmates + 1
+    elseif m.kind == "class" or m.kind == "classcompact" then
+      classes = classes + 1
+    else
+      friends = friends + 1
+    end
+  end
+  Print(string.format("%s, colour %s, name field: %s, %d plate(s) marked", db.enabled and "on" or "off",
+    Core.FormatColor(Color()), field, n))
+  Print(string.format("friends: colour %s, chevron %s, Battle.net friends %s, %d plate(s) marked; %s",
+    Core.FormatColor(FriendColor()), Flag("friendchevron") and "on" or "off", Flag("bnetfriends") and "on" or "off",
+    friends, FriendText("target", "target")))
+  Print(string.format("guildmates: colour %s, chevron %s, %d plate(s) marked; %s",
+    Core.FormatColor(GuildColor()), Flag("guildchevron") and "on" or "off", guildmates,
+    GuildText("target", "target")))
+  Print(string.format("group members: chevsize %s, textsize %s, barsize %s, buffsize %s, namegap %d",
+    tostring(Factor("chevsize")), tostring(Factor("textsize")), tostring(Factor("barsize")),
+    tostring(Factor("buffsize")), Gap("namegap")))
+  Print(string.format("friendlies: level %s; othersize %s, otherbarsize %s, othernamegap %d",
+    Flag("showlevel") and "on" or "off", tostring(Factor("othersize")), tostring(Factor("otherbarsize")),
+    Gap("othernamegap")))
+  Print(string.format("name font: %s", tostring(db.font)))
+  local c = 0
+  for _ in pairs(hidden) do
+    c = c + 1
+  end
+  Print(string.format("compact %s (other friendly players: name only), %d plate(s) compact",
+    db.compact and "on" or "off", c))
+  Print(string.format("class colour %s (other friendly players' names), %d plate(s) coloured",
+    Flag("classcolor") and "on" or "off", classes))
+  Print("/gchev on | off | color #RRGGBB | chevsize 1-5 | textsize 1-3 | barsize 1-3 | buffsize 1-3"
+    .. " | namegap -10-40 | friendcolor #RRGGBB | friendchevron on|off | bnetfriends on|off"
+    .. " | guildcolor #RRGGBB | guildchevron on|off"
+    .. " | othersize 1-3 | otherbarsize 1-3 | othernamegap -10-40 | level on|off | compact on|off | classcolor on|off"
+    .. " | font default|outline|chat|large|game13 | reset | options | debug")
+end
+
+-- PartLabel names a plate part for /gchev debug: its frame name, else the field that holds it
+-- on one of tables (UnitFrame and the name's ancestors), else "(anonymous)".
+local function PartLabel(part, tables)
+  local name = Method(part, "GetName")
+  if type(name) == "string" and name ~= "" then
+    return name
+  end
+  for _, t in ipairs(tables) do
+    local ok, key = pcall(function()
+      for k, v in pairs(t) do
+        if v == part and type(k) == "string" then
+          return k
+        end
+      end
+      return nil
+    end)
+    if ok and type(key) == "string" then
+      return key
+    end
+  end
+  return "(anonymous)"
+end
+
+-- SlashNames (/gchev names) lists, without changing anything or needing a target, every
+-- visible plate whose Blizzard name is not visible (alpha below 1, or hidden) and not covered by
+-- ours: its unit, the unit's name, the alpha, the shown state, and whether the addon still
+-- remembers fading it. Then the driver hook counts and the failed restores.
+local function SlashNames()
+  local plates = type(C_NamePlate) == "table" and Try(C_NamePlate.GetNamePlates)
+  if type(plates) ~= "table" then
+    Print("names: no nameplates")
+    return
+  end
+  local seen, missing = 0, 0
+  for _, plate in ipairs(plates) do
+    local uf = UnitFrameOf(plate)
+    local fs = uf and FindName(uf)
+    if fs then
+      seen = seen + 1
+      local a, shown = Method(fs, "GetAlpha"), Method(fs, "IsShown")
+      if not Covered(uf, fs) and ((type(a) == "number" and a < 0.99) or shown == false) then
+        missing = missing + 1
+        local unit = PlateUnit(plate)
+        Print(string.format("names: %s %q alpha %s shown %s, remembered faded: %s", tostring(unit),
+          tostring(unit and Try(UnitName, unit) or "?"), tostring(a), tostring(shown),
+          fadedNames[fs] and "yes" or "no"))
+      end
+    end
+  end
+  Print(string.format("names: %d plate(s), %d without a visible name; driver hooks: release %s (%d calls), "
+    .. "added %s (%d calls); failed name restores: %d", seen, missing, driverHooks.release and "on" or "off",
+    driverHooks.releaseCalls, driverHooks.added and "on" or "off", driverHooks.addedCalls, restoreFailures))
+end
+
+-- IsSecret is true when the client marks v as a secret value (or issecretvalue fails on it).
+local function IsSecret(v)
+  if type(issecretvalue) ~= "function" then
+    return false
+  end
+  local ok, secret = pcall(issecretvalue, v)
+  return not ok or secret == true
+end
+
+-- ValueText gives v for /gchev debug: "secret" for a secret value (never read: printing it could
+-- raise an error), else tostring(v).
+local function ValueText(v)
+  if IsSecret(v) then
+    return "secret"
+  end
+  local ok, s = pcall(tostring, v)
+  return ok and type(s) == "string" and s or "?"
+end
+
+-- Raw calls fn(...) under pcall and returns ValueText of its first result ("error" when it
+-- raises one, "missing" when fn is not a function), secret or not.
+local function Raw(fn, ...)
+  if type(fn) ~= "function" then
+    return "missing"
+  end
+  local ok, v = pcall(fn, ...)
+  if not ok then
+    return "error"
+  end
+  return ValueText(v)
+end
+
+-- HealthDebug prints, for /gchev debug, unit's health as the client gives it (and whether each
+-- value is secret), whether the health curve works, and the shown state and alpha of uf's
+-- health bar parts. Nothing it prints is ever compared.
+local function HealthDebug(unit, uf)
+  Print(string.format("debug: UnitHealth %s, UnitHealthMax %s, UnitHealthPercent %s", Raw(UnitHealth, unit),
+    Raw(UnitHealthMax, unit), Raw(UnitHealthPercent, unit)))
+  local ok, alpha = HealthAlpha(unit)
+  Print(string.format("debug: health curve: UnitHealthPercent %s, C_CurveUtil.CreateColorCurve %s, CreateColor %s, "
+    .. "curve %s, alpha %s", type(unitAPI.UnitHealthPercent) == "function" and "yes" or "no",
+    type(unitAPI.CreateColorCurve) == "function" and "yes" or "no",
+    type(unitAPI.CreateColor) == "function" and "yes" or "no", healthCurve ~= nil and "built" or "not built",
+    ok and ValueText(alpha) or "unavailable (fallback: UnitHealth / UnitHealthMax)"))
+  local tables, barParts = { uf }, HealthBarParts(uf)
+  if #barParts == 0 then
+    Print("debug: no health bar part (HealthBarsContainer, healthBar) on this plate")
+  end
+  for _, part in ipairs(barParts) do
+    Print(string.format("debug: health bar part %s: shown %s, alpha %s", PartLabel(part, tables),
+      Raw(Field(part, "IsShown"), part), Raw(Field(part, "GetAlpha"), part)))
+  end
+end
+
+local function SlashDebug()
+  local plate = PlateForUnit("target")
+  if type(plate) ~= "table" then
+    Print("debug: no nameplate for the current target")
+    return
+  end
+  local uf = UnitFrameOf(plate)
+  if not uf then
+    Print("debug: the target's nameplate has no UnitFrame")
+    return
+  end
+  local fs0, field = FindName(uf)
+  local unit = PlateUnit(plate)
+  Print(string.format("debug: target plate unit %s, name field %s, group member: %s", tostring(unit),
+    field and ("UnitFrame." .. field) or "not found", IsMember(unit) and "yes" or "no"))
+  Print("debug: " .. FriendText(unit, "target"))
+  Print("debug: " .. GuildText(unit, "target"))
+  Print("debug: " .. ClassText(unit))
+  -- Blizzard's name on this plate, and whether ours covers it (enemies without a name: Blizzard's
+  -- alpha 0 and "covered: no" would be a fade we failed to give back).
+  if fs0 then
+    Print(string.format("debug: Blizzard name alpha %s, shown %s, covered by ours: %s, faded names pending: %d",
+      tostring(Method(fs0, "GetAlpha")), tostring(Method(fs0, "IsShown")), Covered(uf, fs0) and "yes" or "no",
+      PendingNames()))
+  end
+  Print(string.format("debug: driver hooks: release %s (%d calls), added %s (%d calls); failed name restores: %d",
+    driverHooks.release and "on" or "off", driverHooks.releaseCalls, driverHooks.added and "on" or "off",
+    driverHooks.addedCalls, restoreFailures))
+  HealthDebug(type(unit) == "string" and unit or "target", uf)
+  -- The target itself is never compact, so also list what compact mode would hide on it:
+  -- that is how the plate's parts on this client can be checked in game.
+  local rec = hidden[uf]
+  local parts, verb = rec and rec.list, "hidden"
+  if not parts then
+    parts, verb = CompactParts(uf, uf), "compact would hide"
+  end
+  Print(string.format("debug: mode %s", Mode(unit)))
+  if not parts then
+    Print("debug: compact cannot apply here (no name, or the name is not inside UnitFrame)")
+    return
+  end
+  local tables = { uf }
+  local fs = FindName(uf)
+  local node = fs and Method(fs, "GetParent")
+  for _ = 1, MAX_DEPTH do
+    if type(node) ~= "table" or node == uf then
+      break
+    end
+    tables[#tables + 1] = node
+    node = Method(node, "GetParent")
+  end
+  Print(string.format("debug: %s %d part(s)", verb, #parts))
+  for _, part in ipairs(parts) do
+    Print(string.format("debug:   %s (%s)", PartLabel(part, tables), tostring(Method(part, "GetObjectType") or "?")))
+  end
+end
+
+local function Slash(msg)
+  msg = type(msg) == "string" and msg:gsub("^%s+", ""):gsub("%s+$", "") or ""
+  local cmd, arg = msg:match("^(%S*)%s*(.-)$")
+  cmd = (cmd or ""):lower()
+  if cmd == "classcolour" then
+    cmd = "classcolor"
+  end
+  if cmd == "debug" then
+    SlashDebug()
+    return
+  end
+  if cmd == "names" then
+    SlashNames()
+    return
+  end
+  if not db then
+    Print("not initialised yet")
+    return
+  end
+  if cmd == "options" then
+    OpenOptions()
+  elseif cmd == "on" or cmd == "off" then
+    SetEnabled(cmd)
+    Print(db.enabled and "on" or "off")
+  elseif cmd == "color" or cmd == "colour" then
+    local r, g, b = Core.ParseColor(arg)
+    if not r or not SetColor(r, g, b) then
+      Print(string.format("invalid colour %q: use #RRGGBB, e.g. /gchev color #FF4FD8; nothing changed", arg or ""))
+      return
+    end
+    Print("colour " .. Core.FormatColor(r, g, b))
+  elseif FACTOR_KINDS[cmd] then
+    if arg == "" then
+      Print(string.format("%s %s (1 to %d, default 1)", cmd, tostring(Factor(cmd)), Core.MaxFactor(cmd)))
+      return
+    end
+    if not SetFactor(cmd, arg) then
+      Print(string.format("invalid %s %q: use a number from 1 to %d, e.g. /gchev %s 1.5; nothing changed", cmd,
+        arg, Core.MaxFactor(cmd), cmd))
+      return
+    end
+    Print(string.format("%s %s", cmd, tostring(Factor(cmd))))
+  elseif Core.GAP_KINDS[cmd] then
+    if arg == "" then
+      Print(string.format("%s %d (%d to %d, default %d)", cmd, Gap(cmd), Core.MIN_GAP, Core.MAX_GAP,
+        Core.DEFAULT_GAP))
+      return
+    end
+    if not SetGap(cmd, arg) then
+      Print(string.format("invalid %s %q: use a whole number from %d to %d, e.g. /gchev %s 4; nothing changed", cmd,
+        arg, Core.MIN_GAP, Core.MAX_GAP, cmd))
+      return
+    end
+    Print(string.format("%s %d", cmd, Gap(cmd)))
+  elseif cmd == "font" then
+    local keys = {}
+    for _, f in ipairs(Core.FONTS) do
+      keys[#keys + 1] = f.key
+    end
+    if arg == "" then
+      Print(string.format("font %s (%s)", tostring(db.font), table.concat(keys, " | ")))
+      return
+    end
+    local key = Core.ParseFont(arg)
+    if not key or not SetNameFont(key) then
+      Print(string.format("invalid font %q: use %s; nothing changed", arg, table.concat(keys, " | ")))
+      return
+    end
+    Print("font " .. key)
+  elseif cmd == "friendcolor" or cmd == "friendcolour" then
+    if arg == "" then
+      Print(string.format("friendcolor %s (default %s)", Core.FormatColor(FriendColor()),
+        Core.FormatColor(unpack(Core.DEFAULT_FRIEND_COLOR))))
+      return
+    end
+    local r, g, b = Core.ParseColor(arg)
+    if not r or not SetFriendColor(r, g, b) then
+      Print(string.format("invalid friendcolor %q: use #RRGGBB, e.g. /gchev friendcolor #3FA7FF; nothing changed", arg))
+      return
+    end
+    Print("friendcolor " .. Core.FormatColor(r, g, b))
+  elseif cmd == "guildcolor" or cmd == "guildcolour" then
+    if arg == "" then
+      Print(string.format("guildcolor %s (default %s)", Core.FormatColor(GuildColor()),
+        Core.FormatColor(unpack(Core.DEFAULT_GUILD_COLOR))))
+      return
+    end
+    local r, g, b = Core.ParseColor(arg)
+    if not r or not SetGuildColor(r, g, b) then
+      Print(string.format("invalid guildcolor %q: use #RRGGBB, e.g. /gchev guildcolor #40FF40; nothing changed", arg))
+      return
+    end
+    Print("guildcolor " .. Core.FormatColor(r, g, b))
+  elseif FLAG_DEFAULTS[cmd] ~= nil then
+    if arg == "" then
+      Print(string.format("%s %s (on or off, default %s)", cmd, Flag(cmd) and "on" or "off",
+        FLAG_DEFAULTS[cmd] and "on" or "off"))
+      return
+    end
+    if not SetFlag(cmd, arg) then
+      Print(string.format("invalid %s %q: use /gchev %s on or /gchev %s off; nothing changed", cmd, arg, cmd, cmd))
+      return
+    end
+    Print(string.format("%s %s", cmd, Flag(cmd) and "on" or "off"))
+  elseif cmd == "level" then
+    if arg == "" then
+      Print(string.format("level %s (on or off, default on)", Flag("showlevel") and "on" or "off"))
+      return
+    end
+    if not SetFlag("showlevel", arg) then
+      Print(string.format("invalid level %q: use /gchev level on or /gchev level off; nothing changed", arg))
+      return
+    end
+    Print("level " .. (Flag("showlevel") and "on" or "off"))
+  elseif cmd == "compact" then
+    if arg == "" then
+      Print(string.format("compact %s (on or off, default on)", db.compact and "on" or "off"))
+      return
+    end
+    if not SetCompact(arg) then
+      Print(string.format("invalid compact %q: use /gchev compact on or /gchev compact off; nothing changed", arg))
+      return
+    end
+    Print("compact " .. (db.compact and "on" or "off"))
+  elseif cmd == "reset" then
+    ResetColor()
+    Print("colour reset to " .. Core.FormatColor(Color()))
+  else
+    SlashStatus()
+  end
+end
+
+SLASH_GROUPCHEVRON1 = "/gchev"
+if type(SlashCmdList) == "table" then
+  SlashCmdList.GROUPCHEVRON = function(msg)
+    SafeCall("/gchev", Slash, msg)
+  end
+end
