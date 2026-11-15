@@ -2,7 +2,7 @@
 ## Title: GroupChevron
 ## Notes: Marks the members of your party or raid: pink name and a small double chevron on their nameplate; friends outside the group get a blue name and chevron, guildmates a green one; other friendly players show only their name, optionally in their class colour, with their level after it while their health bar is hidden, e.g. "Garzak (19)". Needs the friendly player nameplates (V / Shift+V). /gchev
 ## Version: 0.20.0
-## Author: Eric Dalongeville
+## Author: Garzak
 ## X-License: MIT
 ## IconTexture: Interface\AddOns\GroupChevron\icon
 ## SavedVariables: GroupChevronDB
