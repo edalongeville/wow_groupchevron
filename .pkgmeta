@@ -1,0 +1,16 @@
+# BigWigs packager (CurseForge). The addon lives in the GroupChevron/ subfolder of the repository,
+# so it is moved to the top of the release and everything else is left out of the zip.
+package-as: GroupChevron
+
+move-folders:
+  GroupChevron/GroupChevron: GroupChevron
+
+ignore:
+  - .github
+  - .luacheckrc
+  - .pkgmeta
+  - docs
+  - spec
+  - tools
+  - README.md
+  - LICENSE
