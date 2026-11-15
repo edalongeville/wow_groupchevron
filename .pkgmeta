@@ -9,6 +9,7 @@ ignore:
   - .github
   - .luacheckrc
   - .pkgmeta
+  - assets
   - docs
   - spec
   - tools

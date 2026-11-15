@@ -18,6 +18,7 @@ Implementation notes (modes, relations, fonts, sizes, localisation, how plates a
 | Path | Content |
 |---|---|
 | `GroupChevron/` | the addon: `Core.lua` (pure, unit-tested logic), `GroupChevron.lua` (WoW glue), `.toc`, `chevron.tga`, `icon.tga` |
+| `assets/` | CurseForge project icon (`curseforge-icon.png`, 400×400) |
 | `docs/` | implementation notes |
 | `spec/` | [busted](https://lunarmodules.github.io/busted/) tests (`Core.lua` and a smoke test of the glue against a stubbed WoW API) |
 | `tools/` | generators for `chevron.tga` and `icon.tga` (Python 3, no dependencies) |
@@ -36,6 +37,7 @@ Regenerate the textures from the repository root:
 ```bash
 python3 tools/chevron_tga.py GroupChevron/chevron.tga
 python3 tools/groupchevron_icon_tga.py GroupChevron/icon.tga
+python3 tools/curseforge_icon_png.py assets/curseforge-icon.png
 ```
 
 Bump `## Version` in `GroupChevron/GroupChevron.toc` with every change to the addon (patch for fixes, minor for features).
