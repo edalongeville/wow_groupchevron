@@ -180,7 +180,7 @@ local unitAPI = {
   UnitHealth = UnitHealth,
   UnitHealthMax = UnitHealthMax,
   -- Secret-safe health (compact plates' health bar): UnitHealthPercent(unit, false, curve) with a
-  -- C_CurveUtil colour curve; checked in game on the Forever client (#284), missing = the
+  -- C_CurveUtil colour curve; checked in game on the Forever client, missing = the
   -- UnitHealth / UnitHealthMax fallback.
   UnitHealthPercent = UnitHealthPercent,
   CreateColorCurve = Field(C_CurveUtil, "CreateColorCurve"),
