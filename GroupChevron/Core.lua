@@ -85,6 +85,14 @@ Core.MIN_FACTOR = 1
 Core.DEFAULT_MAX_FACTOR = 3
 Core.MAX_FACTORS = { chevsize = 5 }
 Core.DEFAULT_FACTOR = 1
+-- DEFAULT_FACTORS are the defaults of the kinds that do not start at DEFAULT_FACTOR (1, which
+-- also stays the "no scaling" value the plates compare against).
+Core.DEFAULT_FACTORS = { chevsize = 3, textsize = 1.75, buffsize = 1.1 }
+
+-- DefaultFactor is the default of a factor kind: its DEFAULT_FACTORS entry, else DEFAULT_FACTOR.
+function Core.DefaultFactor(kind)
+  return Core.DEFAULT_FACTORS[kind] or Core.DEFAULT_FACTOR
+end
 
 -- MaxFactor is the largest accepted value of a factor kind (3 for every other or nil kind).
 function Core.MaxFactor(kind)
@@ -127,11 +135,18 @@ end
 -- Name gaps: how far up (positive) or down (negative) our name label sits from where Blizzard
 -- puts its name above the health bar, in whole UI points (the parent's units, not scaled by the
 -- text size): "namegap" for group members, "othernamegap" for other friendly players (compact
--- or not, the target included, like othersize). 0 (default) is the layout without a gap.
+-- or not, the target included, like othersize). 0 is the layout without a gap (NO_GAP); the
+-- default of both kinds is DEFAULT_GAP.
 Core.MIN_GAP = -10
 Core.MAX_GAP = 40
-Core.DEFAULT_GAP = 0
+Core.NO_GAP = 0
+Core.DEFAULT_GAP = 5
 Core.GAP_KINDS = { namegap = true, othernamegap = true }
+
+-- DefaultGap is the default of a gap kind.
+function Core.DefaultGap(_)
+  return Core.DEFAULT_GAP
+end
 
 -- ValidGap is true for a whole number from MIN_GAP to MAX_GAP.
 function Core.ValidGap(v)
@@ -186,7 +201,7 @@ end
 -- db.font and used by /gchev font), label, and the name of a global font object of the client
 -- (nil for "default": Blizzard's own name font, as before). Font objects, not file paths, so
 -- the client's alphabet fallbacks (Cyrillic, Korean, Chinese) stay on our label.
-Core.DEFAULT_FONT = "default"
+Core.DEFAULT_FONT = "outline"
 Core.FONTS = {
   { key = "default", label = "Blizzard's name font" },
   { key = "outline", label = "System (outline)", object = "SystemFont_Outline" },
@@ -294,26 +309,23 @@ function Core.Translate(locale, key)
   return text
 end
 
+-- DEFAULT_CLASSCOLOR is the default of the class colour setting (on).
+Core.DEFAULT_CLASSCOLOR = true
+
 -- InitDB fills the defaults of the saved settings in place and returns db (a new table when
 -- db is not a table). Invalid values are replaced by their default.
 function Core.InitDB(db)
   if type(db) ~= "table" then
     db = {}
   end
-  if not Core.ValidFactor(db.chevsize, "chevsize") then
-    db.chevsize = Core.DEFAULT_FACTOR
-  end
-  if not Core.ValidFactor(db.textsize, "textsize") then
-    db.textsize = Core.DEFAULT_FACTOR
-  end
-  for _, key in ipairs({ "othersize", "barsize", "buffsize", "otherbarsize" }) do
+  for _, key in ipairs({ "chevsize", "textsize", "othersize", "barsize", "buffsize", "otherbarsize" }) do
     if not Core.ValidFactor(db[key], key) then
-      db[key] = Core.DEFAULT_FACTOR
+      db[key] = Core.DefaultFactor(key)
     end
   end
   for _, key in ipairs({ "namegap", "othernamegap" }) do
     if not Core.ValidGap(db[key]) then
-      db[key] = Core.DEFAULT_GAP
+      db[key] = Core.DefaultGap(key)
     end
   end
   if not Core.ValidFont(db.font) then
@@ -346,7 +358,7 @@ function Core.InitDB(db)
     end
   end
   if type(db.classcolor) ~= "boolean" then
-    db.classcolor = false
+    db.classcolor = Core.DEFAULT_CLASSCOLOR
   end
   return db
 end

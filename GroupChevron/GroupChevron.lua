@@ -6,7 +6,7 @@
 -- colour (default #3FA7FF) and, unless friendchevron is off, the same chevron in that colour.
 -- With compact on (default), other friendly players (friends included) who are not the
 -- current target show only their name; everyone else's plate is left as Blizzard draws it.
--- With classcolor on (default off), the other friendly players (not members, not friends,
+-- With classcolor on (default on), the other friendly players (not members, not friends,
 -- target or not, compact or not) get their name in their class colour, the client's own.
 -- Unless showlevel is off, friendly players outside the group (friends included) get their
 -- level after the name on compact plates while their health bar is hidden, "Name (19)"
@@ -237,7 +237,7 @@ end
 
 -- FLAG_DEFAULTS are the saved on/off settings (besides enabled and compact) and their default.
 local FLAG_DEFAULTS = {
-  friendchevron = true, bnetfriends = true, guildchevron = true, classcolor = false, showlevel = true,
+  friendchevron = true, bnetfriends = true, guildchevron = true, classcolor = Core.DEFAULT_CLASSCOLOR, showlevel = true,
 }
 
 -- Flag returns a saved boolean setting of FLAG_DEFAULTS (its default when missing or invalid).
@@ -248,7 +248,7 @@ local function Flag(key)
   return FLAG_DEFAULTS[key] == true
 end
 
--- Factor returns a saved size factor (1 when missing or invalid): "chevsize"; for group
+-- Factor returns a saved size factor (Core.DefaultFactor when missing or invalid): "chevsize"; for group
 -- members "textsize", "barsize" (health bar), "buffsize" (auras); for other friendly players
 -- (compact or not, the target included, see Core.OtherSizes) "othersize" (name) and
 -- "otherbarsize" (health bar, shown while hurt when compact).
@@ -256,16 +256,16 @@ local function Factor(key)
   if type(db) == "table" and Core.ValidFactor(db[key], key) then
     return db[key]
   end
-  return Core.DEFAULT_FACTOR
+  return Core.DefaultFactor(key)
 end
 
--- Gap returns a saved name gap (0 when missing or invalid, see Core.ValidGap): "namegap" for
--- group members, "othernamegap" for other friendly players (wherever othersize applies).
+-- Gap returns a saved name gap (Core.DefaultGap when missing or invalid, see Core.ValidGap):
+-- "namegap" for group members, "othernamegap" for other friendly players (wherever othersize applies).
 local function Gap(key)
   if type(db) == "table" and Core.ValidGap(db[key]) then
     return db[key]
   end
-  return Core.DEFAULT_GAP
+  return Core.DefaultGap(key)
 end
 
 -- ChosenFontObject returns the client's font object the player chose for our own name labels
@@ -1348,7 +1348,7 @@ local function DefaultFullPlate(uf, info)
     return
   end
   local size = OtherFactor("othersize")
-  if size ~= Core.DEFAULT_FACTOR or Gap("othernamegap") ~= Core.DEFAULT_GAP then
+  if size ~= Core.DEFAULT_FACTOR or Gap("othernamegap") ~= Core.NO_GAP then
     ShowOtherName(uf, size)
   end
   local bar = OtherFactor("otherbarsize")
@@ -1696,16 +1696,14 @@ local function ResetAll()
   db.bnetfriends = true
   db.guildcolor = Core.CopyDefaultGuildColor()
   db.guildchevron = true
-  db.classcolor = false
+  db.classcolor = Core.DEFAULT_CLASSCOLOR
   db.showlevel = true
-  db.chevsize = Core.DEFAULT_FACTOR
-  db.textsize = Core.DEFAULT_FACTOR
-  db.othersize = Core.DEFAULT_FACTOR
-  db.barsize = Core.DEFAULT_FACTOR
-  db.buffsize = Core.DEFAULT_FACTOR
-  db.otherbarsize = Core.DEFAULT_FACTOR
-  db.namegap = Core.DEFAULT_GAP
-  db.othernamegap = Core.DEFAULT_GAP
+  for _, key in ipairs({ "chevsize", "textsize", "othersize", "barsize", "buffsize", "otherbarsize" }) do
+    db[key] = Core.DefaultFactor(key)
+  end
+  for _, key in ipairs({ "namegap", "othernamegap" }) do
+    db[key] = Core.DefaultGap(key)
+  end
   db.font = Core.DEFAULT_FONT
   Changed()
   return true
@@ -1879,13 +1877,13 @@ local function BuildPanel()
   local function Slider(text, y, kind)
     local isGap = Core.GAP_KINDS[kind] == true
     local min, max, step = Core.MIN_FACTOR, Core.MaxFactor(kind), 0.05
-    local fmt, default, set = "%.2f", Core.DEFAULT_FACTOR, SetFactor
+    local fmt, default, set = "%.2f", Core.DefaultFactor(kind), SetFactor
     local function snap(v)
       return Core.SnapFactor(v, kind)
     end
     if isGap then
       min, max, step = Core.MIN_GAP, Core.MAX_GAP, 1
-      fmt, default, set, snap = "%d", Core.DEFAULT_GAP, SetGap, Core.SnapGap
+      fmt, default, set, snap = "%d", Core.DefaultGap(kind), SetGap, Core.SnapGap
     end
     Label(text, 16, y)
     local s = CreateFrame("Slider", nil, content, "OptionsSliderTemplate")
@@ -2588,7 +2586,8 @@ local function Slash(msg)
     Print("colour " .. Core.FormatColor(r, g, b))
   elseif FACTOR_KINDS[cmd] then
     if arg == "" then
-      Print(string.format("%s %s (1 to %d, default 1)", cmd, tostring(Factor(cmd)), Core.MaxFactor(cmd)))
+      Print(string.format("%s %s (1 to %d, default %s)", cmd, tostring(Factor(cmd)), Core.MaxFactor(cmd),
+        tostring(Core.DefaultFactor(cmd))))
       return
     end
     if not SetFactor(cmd, arg) then
@@ -2600,7 +2599,7 @@ local function Slash(msg)
   elseif Core.GAP_KINDS[cmd] then
     if arg == "" then
       Print(string.format("%s %d (%d to %d, default %d)", cmd, Gap(cmd), Core.MIN_GAP, Core.MAX_GAP,
-        Core.DEFAULT_GAP))
+        Core.DefaultGap(cmd)))
       return
     end
     if not SetGap(cmd, arg) then

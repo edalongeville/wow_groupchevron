@@ -152,6 +152,11 @@ local function newTreePlate(unit, nested)
 end
 
 -- load runs Core.lua and GroupChevron.lua in a fresh fake client.
+-- NEUTRAL_SETTINGS are the settings the specs run with unless they say otherwise (see load).
+local NEUTRAL_SETTINGS = {
+  chevsize = 1, textsize = 1, buffsize = 1, namegap = 0, othernamegap = 0, font = "default", classcolor = false,
+}
+
 local function load(opts)
   opts = opts or {}
   local env = {}
@@ -260,6 +265,17 @@ local function load(opts)
   end
   env._G = env
   env.GroupChevronDB = opts.saved
+  if not opts.factory and (opts.saved == nil or type(opts.saved) == "table") then
+    -- Most specs were written for neutral settings (size 1, no name gap, Blizzard's font, class
+    -- colour off): fill them in unless the spec sets its own or asks for the factory defaults
+    -- (opts.factory), which are what a new install gets.
+    env.GroupChevronDB = opts.saved or {}
+    for k, v in pairs(NEUTRAL_SETTINGS) do
+      if env.GroupChevronDB[k] == nil then
+        env.GroupChevronDB[k] = v
+      end
+    end
+  end
   setmetatable(env, { __index = _G })
 
   local ns = {}
@@ -327,6 +343,40 @@ describe("GroupChevron", function()
     assert.is_true(env.GroupChevronDB.enabled)
     assert.are.equal("#FF4FD8", hex(env.GroupChevronDB.color))
     assert.is_function(env.hooks.CompactUnitFrame_UpdateName)
+  end)
+
+  it("gives a new install the factory defaults of the settings page", function()
+    local db = load({ factory = true }).GroupChevronDB
+    assert.is_true(db.enabled)
+    assert.are.equal("#FF4FD8", hex(db.color))
+    assert.are.equal("outline", db.font)
+    assert.are.equal(3, db.chevsize)
+    assert.are.equal(1.75, db.textsize)
+    assert.are.equal(1, db.barsize)
+    assert.are.equal(1.1, db.buffsize)
+    assert.are.equal(5, db.namegap)
+    assert.is_true(db.compact)
+    assert.is_true(db.classcolor)
+    assert.is_true(db.showlevel)
+    assert.are.equal(1, db.othersize)
+    assert.are.equal(1, db.otherbarsize)
+    assert.are.equal(5, db.othernamegap)
+    assert.are.equal("#3FA7FF", hex(db.friendcolor))
+    assert.is_true(db.friendchevron)
+    assert.is_true(db.bnetfriends)
+    assert.are.equal("#40FF40", hex(db.guildcolor))
+    assert.is_true(db.guildchevron)
+  end)
+
+  it("keeps the values a player already saved when the defaults change", function()
+    local db = load({ factory = true, saved = { chevsize = 1, textsize = 2, namegap = 0, font = "default",
+      classcolor = false } }).GroupChevronDB
+    assert.are.equal(1, db.chevsize)
+    assert.are.equal(2, db.textsize)
+    assert.are.equal(0, db.namegap)
+    assert.are.equal("default", db.font)
+    assert.is_false(db.classcolor)
+    assert.are.equal(1.1, db.buffsize) -- never saved: the new default
   end)
 
   it("marks a group member and leaves everyone else alone", function()
@@ -1233,7 +1283,7 @@ describe("GroupChevron", function()
       friend(env, plate)
       assert.are.equal(0, offset())
       env.slash("othernamegap")
-      assert.is_true(printedContains(env, "othernamegap 0 (-10 to 40, default 0)"))
+      assert.is_true(printedContains(env, "othernamegap 0 (-10 to 40, default 5)"))
       env.slash("othernamegap 6")
       assert.are.equal(6, env.GroupChevronDB.othernamegap)
       assert.are.equal(6, offset())
@@ -2711,7 +2761,7 @@ describe("GroupChevron", function()
     it("sets classcolor with /gchev, refusing invalid values", function()
       local env = load()
       env.slash("classcolor")
-      assert.is_true(printedContains(env, "classcolor off (on or off, default off)"))
+      assert.is_true(printedContains(env, "classcolor off (on or off, default on)"))
       env.slash("classcolor maybe")
       assert.is_true(printedContains(env, "invalid classcolor \"maybe\""))
       assert.is_false(env.GroupChevronDB.classcolor)
@@ -3118,12 +3168,12 @@ describe("GroupChevron", function()
       env.slash("barsize 2")
       env.slash("buffsize 2")
       env.slash("otherbarsize 2")
-      env.slash("namegap 5")
+      env.slash("namegap 7")
       env.slash("othernamegap -2")
       env.slash("compact off")
       env.slash("off")
       env.slash("reset")
-      assert.are.equal(5, env.GroupChevronDB.namegap)
+      assert.are.equal(7, env.GroupChevronDB.namegap)
       assert.are.equal("#FF4FD8", hex(env.GroupChevronDB.color))
       assert.are.equal(2, env.GroupChevronDB.chevsize)
       assert.is_false(env.GroupChevronDB.compact)
@@ -3134,14 +3184,16 @@ describe("GroupChevron", function()
       button.scripts.OnClick(button)
       local db = env.GroupChevronDB
       assert.are.equal("#FF4FD8", hex(db.color))
-      assert.are.equal(1, db.chevsize)
-      assert.are.equal(1, db.textsize)
+      assert.are.equal(3, db.chevsize)
+      assert.are.equal(1.75, db.textsize)
       assert.are.equal(1, db.othersize)
       assert.are.equal(1, db.barsize)
-      assert.are.equal(1, db.buffsize)
+      assert.are.equal(1.1, db.buffsize)
       assert.are.equal(1, db.otherbarsize)
-      assert.are.equal(0, db.namegap)
-      assert.are.equal(0, db.othernamegap)
+      assert.are.equal(5, db.namegap)
+      assert.are.equal(5, db.othernamegap)
+      assert.are.equal("outline", db.font)
+      assert.is_true(db.classcolor)
       assert.is_true(db.enabled)
       assert.is_true(db.compact)
     end)
@@ -3209,7 +3261,7 @@ describe("GroupChevron", function()
       assert.is_true(env.GroupChevronDB.guildchevron)
     end)
 
-    it("has a Class colour checkbox in the Friendlies section, reset to off", function()
+    it("has a Class colour checkbox in the Friendlies section, reset to on", function()
       local overrides, rec = widgetClient()
       local env = load({ overrides = overrides })
       local classBox = widget(rec, "CheckButton", 6)
@@ -3230,12 +3282,11 @@ describe("GroupChevron", function()
       assert.is_false(classBox.checked)
       assert.are.same(BLUE, plate.UnitFrame.name.color)
 
-      env.slash("classcolor on")
       local button = widget(rec, "Button", 2)
       button.scripts.OnClick(button)
-      assert.is_false(env.GroupChevronDB.classcolor)
-      assert.is_false(classBox.checked)
-      assert.are.same(BLUE, plate.UnitFrame.name.color)
+      assert.is_true(env.GroupChevronDB.classcolor)
+      assert.is_true(classBox.checked)
+      assert.are.equal("#00FFFF", hex(plate.UnitFrame.name.color))
     end)
 
     it("has a Show level checkbox in the Friendlies section, reset by Reset to defaults", function()
@@ -3292,8 +3343,8 @@ describe("GroupChevron", function()
 
       local reset = widget(rec, "Button", 2)
       reset.scripts.OnClick(reset)
-      assert.are.equal("default", env.GroupChevronDB.font)
-      assert.are.equal(NAMEPLATE_FONT, label.fontObject)
+      assert.are.equal("outline", env.GroupChevronDB.font)
+      assert.are.equal(OUTLINE, label.fontObject)
     end)
 
     it("chooses the font in a drop-down listing every font", function()
@@ -3326,7 +3377,7 @@ describe("GroupChevron", function()
       local reset = widget(rec, "Button", 2)
       reset.scripts.OnClick(reset)
       rec.frame.scripts.OnShow(rec.frame)
-      assert.are.equal(Core.FONTS[1].label, texts[#texts])
+      assert.are.equal(Core.FONTS[2].label, texts[#texts]) -- the default font is "outline"
     end)
 
     it("falls back to the cycling button when the drop-down fails", function()
