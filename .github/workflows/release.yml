@@ -1,0 +1,55 @@
+name: Release
+
+# Push a tag `v<version>` (e.g. `git tag v0.19.1 && git push origin v0.19.1`) to build the zip
+# with the BigWigs packager and upload it to CurseForge (and attach it to a GitHub release).
+# The tag must match `## Version` in GroupChevron/GroupChevron.toc.
+#
+# Secrets (Settings -> Secrets and variables -> Actions):
+#   CF_API_KEY   CurseForge API token (https://wow.curseforge.com/account/api-tokens)
+# And in GroupChevron/GroupChevron.toc, once the CurseForge project exists:
+#   ## X-Curse-Project-ID: <numeric project id>
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write   # the packager creates the GitHub release
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # the packager builds the changelog from the tag history
+
+      - name: Tag matches the .toc version
+        run: |
+          toc=$(sed -n 's/^## Version:[[:space:]]*//p' GroupChevron/GroupChevron.toc | tr -d '\r' | head -1)
+          if [ "${GITHUB_REF_NAME}" != "v${toc}" ]; then
+            echo "::error::Tag ${GITHUB_REF_NAME} does not match .toc version v${toc}"
+            exit 1
+          fi
+
+      - name: Install Lua tooling
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq lua5.1 lua-check lua-busted
+
+      - name: Lint and test
+        run: |
+          luacheck .
+          busted --lua=lua5.1 spec
+
+      - name: Package and upload
+        uses: BigWigsMods/packager@v2
+        env:
+          CF_API_KEY: ${{ secrets.CF_API_KEY }}
+          GITHUB_OAUTH: ${{ secrets.GITHUB_TOKEN }}
