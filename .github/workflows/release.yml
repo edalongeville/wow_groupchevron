@@ -5,7 +5,7 @@ name: Release
 # The tag must match `## Version` in GroupChevron/GroupChevron.toc.
 #
 # Secrets (Settings -> Secrets and variables -> Actions):
-#   CF_API_KEY   CurseForge API token (https://wow.curseforge.com/account/api-tokens)
+#   CF_API_TOKEN CurseForge API token (https://wow.curseforge.com/account/api-tokens)
 # And in GroupChevron/GroupChevron.toc, once the CurseForge project exists:
 #   ## X-Curse-Project-ID: <numeric project id>
 
@@ -51,5 +51,5 @@ jobs:
       - name: Package and upload
         uses: BigWigsMods/packager@v2
         env:
-          CF_API_KEY: ${{ secrets.CF_API_KEY }}
-          GITHUB_OAUTH: ${{ secrets.GITHUB_TOKEN }}
+          CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          GH_API_TOKEN: ${{ secrets.GITHUB_TOKEN }}
