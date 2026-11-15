@@ -807,8 +807,8 @@ describe("GroupChevron", function()
       end
       local function isSecret(v) return secrets[v] ~= nil end
 
-      -- curveAPI fakes the client of the client with secret health values: UnitHealth / UnitHealthMax / UnitHealthPercent are
-      -- secret; UnitHealthPercent(unit, false, curve) gives a colour whose alpha is the curve
+      -- curveAPI fakes a client with secret health values: UnitHealth / UnitHealthMax /
+      -- UnitHealthPercent are secret; UnitHealthPercent(unit, false, curve) gives a colour whose alpha is the curve
       -- (piecewise linear between its points) at the health fraction, secret too. s.calls counts
       -- the UnitHealthPercent calls with a curve, s.curves the curves built; health is read
       -- from s.env.world.health (s.env is set once loaded).
