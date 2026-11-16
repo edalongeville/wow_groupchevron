@@ -11,6 +11,8 @@ The addon is still being tested.
 - Adds a pink chevron above group members
 - Adds a blue chevron above friends (and Battle.net friends)
 - Adds a green chevron above guildmates
+- Adds a yellow single chevron and a yellow name above hostile units tied to one of your quests (kill, item drop, ...), with its own colour, chevron size, text size and name height in the **Quest hostiles** section of the options
+- Every chevron has a black outline (one **Outline** slider per section: group members, friends, guildmates, quest hostiles; default 2, from 0 = no outline to 5) and the options page shows a live preview of the chevron (chosen colour, size and outline), beside each colour swatch.
 - Changes the nameplate font
 - Colors names by class
 - Displays friendlies' (non-grouped players') health bars only when below 100%
@@ -40,6 +42,7 @@ Regenerate the textures from the repository root:
 python3 tools/chevron_tga.py GroupChevron/chevron.tga
 python3 tools/groupchevron_icon_tga.py GroupChevron/icon.tga
 python3 tools/curseforge_icon_png.py assets/curseforge-icon.png
+python3 tools/preview_backdrop_tga.py GroupChevron/backdrop.tga
 ```
 
 Bump `## Version` in `GroupChevron/GroupChevron.toc` with every change to the addon (patch for fixes, minor for features).

@@ -322,6 +322,139 @@ describe("GroupChevron Core", function()
     end)
   end)
 
+  describe("hostiles tied to a quest", function()
+    it("defaults the hostile settings like the friendlies, in yellow", function()
+      local db = Core.InitDB(nil)
+      assert.are.same({ 1, 1, 0 }, db.hostilecolor)
+      assert.are.equal(Core.DefaultFactor("chevsize"), db.hostilechevsize) -- the friends' chevron size
+      assert.are.equal(Core.DefaultFactor("othersize"), db.hostilesize)
+      assert.are.equal(Core.DefaultGap("othernamegap"), db.hostilenamegap)
+      assert.are_not.equal(Core.DEFAULT_HOSTILE_COLOR, Core.CopyDefaultHostileColor())
+      assert.are.same(Core.DEFAULT_HOSTILE_COLOR, Core.CopyDefaultHostileColor())
+    end)
+
+    it("InitDB keeps valid hostile values, repairs invalid ones and copies the colour", function()
+      local color = { 0.2, 0.4, 0.6 }
+      local db = Core.InitDB({ hostilecolor = color, hostilechevsize = 4.5, hostilesize = 2, hostilenamegap = -4 })
+      assert.are.same({ 0.2, 0.4, 0.6 }, db.hostilecolor)
+      assert.are_not.equal(color, db.hostilecolor)
+      assert.are.equal(4.5, db.hostilechevsize)
+      assert.are.equal(2, db.hostilesize)
+      assert.are.equal(-4, db.hostilenamegap)
+      for _, bad in ipairs({ "x", 0, 9, -1, 0 / 0, true }) do
+        db = Core.InitDB({ hostilecolor = bad, hostilechevsize = bad, hostilesize = bad })
+        assert.are.same({ 1, 1, 0 }, db.hostilecolor)
+        assert.are.equal(3, db.hostilechevsize)
+        assert.are.equal(1, db.hostilesize)
+      end
+      for _, bad in ipairs({ "x", 41, -11, 2.5, 0 / 0, true }) do
+        assert.are.equal(5, Core.InitDB({ hostilenamegap = bad }).hostilenamegap)
+      end
+    end)
+
+    it("accepts a hostile chevron size up to 5, the text size up to 3 and the gap from -10 to 40", function()
+      assert.is_true(Core.ValidFactor(5, "hostilechevsize"))
+      assert.is_false(Core.ValidFactor(5.05, "hostilechevsize"))
+      assert.is_true(Core.ValidFactor(3, "hostilesize"))
+      assert.is_false(Core.ValidFactor(3.05, "hostilesize"))
+      assert.are.equal(5, Core.MaxFactor("hostilechevsize"))
+      assert.are.equal(4.5, Core.ParseFactor("4.5", "hostilechevsize"))
+      assert.is_nil(Core.ParseFactor("6", "hostilechevsize"))
+      assert.is_true(Core.GAP_KINDS.hostilenamegap)
+      assert.are.equal(5, Core.DefaultGap("hostilenamegap"))
+    end)
+
+    it("has an English and a French title for the options group", function()
+      assert.are.equal("Quest hostiles (enemies tied to your quests)", Core.Translate("enUS", "hostiles"))
+      assert.are.equal("Ennemis de quête (liés à vos quêtes)", Core.Translate("frFR", "hostiles"))
+      assert.are.equal("Quest hostiles (enemies tied to your quests)", Core.Translate("deDE", "hostiles"))
+    end)
+
+    -- questAPI: the injected functions for the hostile checks; quests[unit] is the quest answer.
+    local function questAPI(attackable, quests)
+      local api = fakeAPI({}, {})
+      api.UnitIsFriend = function() return false end
+      api.UnitCanAttack = function(_, unit) return attackable[unit] == true end
+      api.IsRelatedToActiveQuest = function(unit)
+        api.asked = (api.asked or 0) + 1
+        return quests[unit] == true
+      end
+      return api
+    end
+
+    it("QuestLookup answers from the API, and false for anything unknown", function()
+      local api = questAPI({}, { u = true, v = false })
+      assert.are.same({ true, "unit" }, { Core.QuestLookup(api, "u") })
+      assert.are.same({ false, "none" }, { Core.QuestLookup(api, "v") })
+      assert.are.same({ false, "none" }, { Core.QuestLookup(api, "") })
+      assert.are.same({ false, "none" }, { Core.QuestLookup(api, nil) })
+      assert.are.same({ false, "none" }, { Core.QuestLookup(api, SECRET) })
+      assert.are.same({ false, "missing" }, { Core.QuestLookup({}, "u") })
+      assert.are.same({ false, "missing" }, { Core.QuestLookup(nil, "u") })
+      -- A truthy answer that is not exactly true (a number, a table) does not count.
+      api.IsRelatedToActiveQuest = function() return 1 end
+      assert.are.same({ false, "none" }, { Core.QuestLookup(api, "u") })
+      api.IsRelatedToActiveQuest = function() error("boom") end
+      assert.are.same({ false, "none" }, { Core.QuestLookup(api, "u") })
+      api.IsRelatedToActiveQuest = function() return SECRET end
+      assert.are.same({ false, "none" }, { Core.QuestLookup(api, "u") })
+    end)
+
+    it("UnitInfo reads the quest only for a unit known to be attackable", function()
+      local api = questAPI({ a = true }, { a = true, b = true })
+      local info = Core.UnitInfo(api, "a", {})
+      assert.is_true(info.attackable)
+      assert.is_true(info.quest)
+      assert.are.equal("unit", info.questSource)
+      assert.are.equal(1, api.asked)
+      info = Core.UnitInfo(api, "b", {}) -- tied to a quest but not attackable: not asked
+      assert.is_false(info.attackable)
+      assert.is_false(info.quest)
+      assert.are.equal("skipped", info.questSource)
+      assert.are.equal(1, api.asked)
+      -- No UnitCanAttack: unknown, not asked.
+      api.UnitCanAttack = nil
+      info = Core.UnitInfo(api, "a", {})
+      assert.is_nil(info.attackable)
+      assert.is_false(info.quest)
+      assert.are.equal(1, api.asked)
+      -- UnitCanAttack answering a secret value: unknown.
+      api.UnitCanAttack = function() return SECRET end
+      assert.is_nil(Core.UnitInfo(api, "a", {}).attackable)
+    end)
+
+    it("QuestHostile needs the addon on, an attackable unit that is not the player and a quest", function()
+      local on = { enabled = true }
+      assert.is_true(Core.QuestHostile({ attackable = true, quest = true }, on))
+      assert.is_true(Core.QuestHostile({ attackable = true, quest = true, self = false }, on))
+      assert.is_false(Core.QuestHostile({ attackable = true, quest = true, self = true }, on))
+      assert.is_false(Core.QuestHostile({ attackable = true, quest = false }, on))
+      assert.is_false(Core.QuestHostile({ attackable = false, quest = true }, on))
+      assert.is_false(Core.QuestHostile({ quest = true }, on))
+      assert.is_false(Core.QuestHostile({ attackable = true, quest = 1 }, on))
+      assert.is_false(Core.QuestHostile({ attackable = true, quest = true }, { enabled = false }))
+      assert.is_false(Core.QuestHostile({ attackable = true, quest = true }, {}))
+      assert.is_false(Core.QuestHostile({ attackable = true, quest = true }, nil))
+      assert.is_false(Core.QuestHostile(nil, on))
+    end)
+
+    it("PlateMode gives a quest hostile the quest mode, compact or not, and leaves the rest as it was", function()
+      local quest = { attackable = true, quest = true, friend = false, player = false, member = false, self = false }
+      for _, compact in ipairs({ true, false }) do
+        local mode, relation = Core.PlateMode(quest, { enabled = true, compact = compact })
+        assert.are.equal("quest", mode)
+        assert.is_nil(relation)
+      end
+      assert.are.equal("default", (Core.PlateMode(quest, { enabled = false })))
+      -- Not tied to a quest: the plate stays as the game draws it.
+      assert.are.equal("default", (Core.PlateMode({ attackable = true, quest = false, friend = false, player = false },
+        { enabled = true, compact = true })))
+      -- A friendly player is never a quest hostile.
+      local friend = { friend = true, player = true, member = false, self = false, target = false, attackable = false }
+      assert.are.equal("compact", (Core.PlateMode(friend, { enabled = true, compact = true })))
+    end)
+  end)
+
   describe("IsGroupMember", function()
     local players = { party1 = true, raid5 = true, nameplate1 = true, nameplate2 = true, nameplate3 = true,
       nameplate4 = true, player = true }
@@ -527,6 +660,23 @@ describe("GroupChevron Core", function()
       assert.are_not.equal(Core.DEFAULT_FRIEND_COLOR, db.friendcolor) -- a copy
       assert.is_true(db.friendchevron)
       assert.is_true(db.bnetfriends)
+    end)
+
+    it("defaults the chevron size of the friends and of the guildmates to 3 (1 to 5)", function()
+      local db = Core.InitDB({ friendchevsize = 4.5, guildchevsize = 9 })
+      assert.are.equal(4.5, db.friendchevsize)
+      assert.are.equal(3, db.guildchevsize)
+    end)
+
+    it("defaults the outline thickness to 2 (0 to 5) for every kind, 0 meaning no outline", function()
+      local db = Core.InitDB({ guildoutlinesize = 4, hostileoutlinesize = 9, friendoutlinesize = 0 })
+      assert.are.equal(0, db.friendoutlinesize)
+      assert.is_nil(Core.ParseFactor("-1", "friendoutlinesize"))
+      assert.are.equal(0, Core.ParseFactor("0", "friendoutlinesize"))
+      assert.is_nil(Core.ParseFactor("0", "chevsize"))
+      assert.are.equal(2, db.memberoutlinesize)
+      assert.are.equal(4, db.guildoutlinesize)
+      assert.are.equal(2, db.hostileoutlinesize)
     end)
 
     it("keeps valid saved values", function()

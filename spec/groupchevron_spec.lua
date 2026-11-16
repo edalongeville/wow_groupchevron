@@ -155,6 +155,7 @@ end
 -- NEUTRAL_SETTINGS are the settings the specs run with unless they say otherwise (see load).
 local NEUTRAL_SETTINGS = {
   chevsize = 1, textsize = 1, buffsize = 1, namegap = 0, othernamegap = 0, font = "default", classcolor = false,
+  hostilechevsize = 1, friendchevsize = 1, guildchevsize = 1, hostilesize = 1, hostilenamegap = 0,
 }
 
 local function load(opts)
@@ -169,7 +170,10 @@ local function load(opts)
     classes = {}, timers = {}, cvars = { nameplateShowFriends = "1" }, levels = {},
     -- world.inGuild: the player is in a guild; world.guild[unit]: the unit is in the player's
     -- guild (UnitIsInMyGuild); world.guildCalls counts the guild questions asked.
-    inGuild = false, guild = {}, guildCalls = 0 }
+    inGuild = false, guild = {}, guildCalls = 0,
+    -- world.attackable[unit]: UnitCanAttack("player", unit); world.quests[unit]: the unit is tied
+    -- to an active quest (C_QuestLog.UnitIsRelatedToActiveQuest); world.questCalls counts the asks.
+    attackable = {}, quests = {}, questCalls = 0 }
   local modernColors = { MAGE = { 0, 1, 1 }, PRIEST = { 1, 1, 1 } }
   local api = {
     print = function(msg) printed[#printed + 1] = msg end,
@@ -202,6 +206,13 @@ local function load(opts)
       return a == b
     end,
     UnitIsFriend = function(a, b) return a == "player" and world.friends[b] == true end,
+    UnitCanAttack = function(a, b) return a == "player" and world.attackable[b] == true end,
+    C_QuestLog = {
+      UnitIsRelatedToActiveQuest = function(unit)
+        world.questCalls = world.questCalls + 1
+        return world.quests[unit] == true
+      end,
+    },
     UnitGUID = function(unit) return "Player-" .. tostring(unit) end,
     C_FriendList = { IsFriend = function(guid) return world.flist[guid:sub(8)] == true end },
     C_BattleNet = {
@@ -323,6 +334,17 @@ local function load(opts)
   return env
 end
 
+-- vcount counts the "V" textures of a chevron frame (not their black outlines).
+local function vcount(frame)
+  local n = 0
+  for _, t in ipairs(frame.textures) do
+    if t.texture == "Interface\\AddOns\\GroupChevron\\chevron.tga" and not t.owner then
+      n = n + 1
+    end
+  end
+  return n
+end
+
 local function hex(c)
   return string.format("#%02X%02X%02X", math.floor(c[1] * 255 + 0.5), math.floor(c[2] * 255 + 0.5),
     math.floor(c[3] * 255 + 0.5))
@@ -366,6 +388,12 @@ describe("GroupChevron", function()
     assert.is_true(db.bnetfriends)
     assert.are.equal("#40FF40", hex(db.guildcolor))
     assert.is_true(db.guildchevron)
+    -- The hostiles start like the friendlies: chevron at the friends' chevron size, text size 1,
+    -- name height 5; the colour is yellow.
+    assert.are.equal("#FFFF00", hex(db.hostilecolor))
+    assert.are.equal(3, db.hostilechevsize)
+    assert.are.equal(1, db.hostilesize)
+    assert.are.equal(5, db.hostilenamegap)
   end)
 
   it("keeps the values a player already saved when the defaults change", function()
@@ -394,7 +422,7 @@ describe("GroupChevron", function()
     local ch = env.chevron(member)
     assert.is_truthy(ch)
     assert.is_true(ch.shown)
-    assert.are.equal(2, #ch.textures)
+    assert.are.equal(2, vcount(ch))
     assert.are.equal("Interface\\AddOns\\GroupChevron\\chevron.tga", ch.textures[1].texture)
     assert.are.equal("#FF4FD8", hex(ch.textures[1].vertex))
     -- The full name is ours, in pink, over Blizzard's (faded), and carries the chevron.
@@ -2803,6 +2831,344 @@ describe("GroupChevron", function()
     end)
   end)
 
+  describe("hostiles tied to a quest", function()
+    -- questHostile sets up a unit that can be attacked and is tied to a quest on nameplate2.
+    local function questHostile(env, plate)
+      env.world.plates.nameplate2 = plate
+      env.world.attackable.nameplate2, env.world.quests.nameplate2 = true, true
+      env.fire("NAME_PLATE_UNIT_ADDED", "nameplate2")
+    end
+
+    -- untouched checks that nothing of ours is on the plate.
+    local function untouched(env, plate)
+      local label, holder = env.label(plate)
+      assert.is_true(label == nil or holder.shown == false)
+      local ch = env.chevron(plate)
+      assert.is_true(ch == nil or ch.shown == false)
+      assert.are.equal("#0080FF", hex(plate.UnitFrame.name.color))
+      assert.are.equal(1, plate.UnitFrame.name:GetAlpha())
+    end
+
+    it("puts a yellow name and a single chevron on a hostile unit tied to a quest", function()
+      local env = load()
+      local plate = newTreePlate("nameplate2")
+      questHostile(env, plate)
+      local uf = plate.UnitFrame
+      local label, holder = env.label(plate)
+      assert.is_true(holder.shown)
+      assert.are.equal("#FFFF00", hex(label.color))
+      assert.are.equal("#FFFF00", hex(uf.name.color))
+      assert.are.equal(0, uf.name.alpha)
+      -- One "V", fully opaque, in the hostile colour, anchored on our name.
+      local ch = env.chevron(plate)
+      assert.is_true(ch.shown)
+      assert.are.equal(1, vcount(ch))
+      assert.are.equal("Interface\\AddOns\\GroupChevron\\chevron.tga", ch.textures[1].texture)
+      assert.are.equal("#FFFF00", hex(ch.textures[1].vertex))
+      assert.are.equal(1, ch.textures[1].alpha)
+      assert.are.equal(label, ch.points[1][2])
+      assert.are.equal("BOTTOM", ch.points[1][1])
+      assert.are.equal("TOP", ch.points[1][3])
+      -- The rest of the plate is Blizzard's: nothing faded or scaled.
+      assert.is_nil(uf.HealthBarsContainer.alpha)
+      assert.is_nil(uf.castBar.alpha)
+      assert.are.equal(1, uf.HealthBarsContainer:GetScale())
+    end)
+
+    it("leaves attackable units that are not tied to a quest alone", function()
+      local env = load()
+      local plate = newTreePlate("nameplate2")
+      env.world.plates.nameplate2 = plate
+      env.world.attackable.nameplate2 = true
+      env.fire("NAME_PLATE_UNIT_ADDED", "nameplate2")
+      untouched(env, plate)
+      assert.are.equal(1, env.world.questCalls)
+    end)
+
+    it("does not ask the quest API about a unit that cannot be attacked, and never marks it", function()
+      local env = load()
+      local plate = newTreePlate("nameplate2")
+      env.world.plates.nameplate2 = plate
+      env.world.quests.nameplate2 = true -- a friendly quest NPC, say
+      env.fire("NAME_PLATE_UNIT_ADDED", "nameplate2")
+      untouched(env, plate)
+      assert.are.equal(0, env.world.questCalls)
+    end)
+
+    it("marks nothing when an API is missing, fails or answers a secret value", function()
+      local cases = {
+        { UnitCanAttack = false },
+        { C_QuestLog = {} },
+        { C_QuestLog = { UnitIsRelatedToActiveQuest = function() error("boom") end } },
+        {
+          issecretvalue = function(v) return v == "secret" end,
+          C_QuestLog = { UnitIsRelatedToActiveQuest = function() return "secret" end },
+        },
+      }
+      for _, overrides in ipairs(cases) do
+        local env = load({ overrides = overrides })
+        local plate = newTreePlate("nameplate2")
+        questHostile(env, plate)
+        untouched(env, plate)
+        assert.is_false(printedContains(env, "error in"))
+      end
+    end)
+
+    it("is off with the addon", function()
+      local env = load()
+      local plate = newTreePlate("nameplate2")
+      questHostile(env, plate)
+      env.slash("off")
+      untouched(env, plate)
+      env.slash("on")
+      assert.are.equal("#FFFF00", hex(env.label(plate).color))
+    end)
+
+    it("applies hostilesize, hostilenamegap and hostilechevsize, independently of the other sizes", function()
+      local env = load({ saved = { hostilesize = 2, hostilenamegap = 4, hostilechevsize = 3, textsize = 3,
+        othersize = 3, othernamegap = 9, namegap = 9, chevsize = 5 } })
+      local plate = newTreePlate("nameplate2")
+      questHostile(env, plate)
+      local label, holder = env.label(plate)
+      assert.are.equal(2, holder.scale)
+      -- (lift 0 + hostilenamegap 4) / hostilesize 2, in our frame's units.
+      assert.are.same({ "BOTTOM", plate.UnitFrame.name, "BOTTOM", 0, 2 }, label.points[1])
+      local ch = env.chevron(plate)
+      assert.are.equal(30, ch.w) -- 10 x 3
+      assert.are.equal(15, ch.h) -- a single "V": 5 x 3
+      assert.are.equal(30, ch.textures[1].w)
+      assert.are.equal(15, ch.textures[1].h)
+      env.slash("hostilechevsize 1.5")
+      assert.are.equal(15, env.chevron(plate).w)
+      assert.are.equal(7.5, env.chevron(plate).h)
+      env.slash("hostilesize 1")
+      env.slash("hostilenamegap -3")
+      label, holder = env.label(plate)
+      assert.are.equal(1, holder.scale)
+      assert.are.equal(-3, label.points[1][5])
+    end)
+
+    it("draws a black outline under the chevron, per kind, with its own thickness", function()
+      local env = load()
+      local plate = newPlate("nameplate1", "Orc", BLUE)
+      env.world.plates.nameplate1 = plate
+      env.world.attackable.nameplate1, env.world.quests.nameplate1 = true, true
+      env.fire("NAME_PLATE_UNIT_ADDED", "nameplate1")
+      local function outlines(ch)
+        local out = {}
+        for _, t in ipairs(ch.textures) do
+          if t.owner then
+            out[#out + 1] = t
+          end
+        end
+        return out
+      end
+      local ch = env.chevron(plate)
+      assert.are.equal(8, #outlines(ch))
+      assert.are.equal("#000000", hex(outlines(ch)[1].vertex))
+      assert.is_true(outlines(ch)[1].shown)
+      -- Default thickness 2: 0.1875 * 2 * the chevron size (1 in these specs), to the right for the first copy.
+      assert.are.equal(0.375, outlines(ch)[1].points[1][4])
+      env.slash("hostileoutlinesize 4")
+      assert.are.equal(4, env.GroupChevronDB.hostileoutlinesize)
+      assert.are.equal(0.75, outlines(env.chevron(plate))[1].points[1][4])
+      env.slash("hostileoutlinesize 0")
+      assert.are.equal(0, env.GroupChevronDB.hostileoutlinesize)
+      assert.is_false(outlines(env.chevron(plate))[1].shown)
+      env.slash("hostileoutlinesize 1")
+      assert.is_true(outlines(env.chevron(plate))[1].shown)
+    end)
+
+    it("sizes the chevron of a friend and of a guildmate by their own settings, not by chevsize", function()
+      local env = load()
+      local plate = newPlate("nameplate1", "Friend", BLUE)
+      env.world.plates.nameplate1 = plate
+      env.world.players.nameplate1, env.world.friends.nameplate1, env.world.flist.nameplate1 = true, true, true
+      env.fire("NAME_PLATE_UNIT_ADDED", "nameplate1")
+      assert.are.equal(10, env.chevron(plate).w) -- friendchevsize is 1 in these specs
+      env.slash("chevsize 4")
+      assert.are.equal(10, env.chevron(plate).w)
+      env.slash("friendchevsize 2.5")
+      assert.are.equal(25, env.chevron(plate).w)
+      env.slash("guildchevsize 4")
+      assert.are.equal(4, env.GroupChevronDB.guildchevsize)
+      assert.are.equal(25, env.chevron(plate).w)
+    end)
+
+    it("takes the hostile colour for the name and the chevron, from /gchev hostilecolor", function()
+      local env = load()
+      local plate = newTreePlate("nameplate2")
+      questHostile(env, plate)
+      env.slash("hostilecolor #FF8000")
+      assert.are.equal("#FF8000", hex(env.GroupChevronDB.hostilecolor))
+      assert.are.equal("#FF8000", hex(env.label(plate).color))
+      assert.are.equal("#FF8000", hex(plate.UnitFrame.name.color))
+      assert.are.equal("#FF8000", hex(env.chevron(plate).textures[1].vertex))
+      env.slash("hostilecolor nonsense")
+      assert.is_true(printedContains(env, "invalid hostilecolor"))
+      assert.are.equal("#FF8000", hex(env.GroupChevronDB.hostilecolor))
+      env.slash("hostilecolor")
+      assert.is_true(printedContains(env, "hostilecolor #FF8000 (default #FFFF00)"))
+      -- The other colours are untouched.
+      assert.are.equal("#FF4FD8", hex(env.GroupChevronDB.color))
+      assert.are.equal("#3FA7FF", hex(env.GroupChevronDB.friendcolor))
+    end)
+
+    it("checks the hostile sizes from the slash commands", function()
+      local env = load()
+      env.slash("hostilechevsize")
+      assert.is_true(printedContains(env, "hostilechevsize 1 (1 to 5, default 3)"))
+      env.slash("hostilechevsize 5")
+      assert.are.equal(5, env.GroupChevronDB.hostilechevsize)
+      env.slash("hostilechevsize 5.5")
+      assert.is_true(printedContains(env, "invalid hostilechevsize"))
+      assert.are.equal(5, env.GroupChevronDB.hostilechevsize)
+      env.slash("hostilesize 3")
+      assert.are.equal(3, env.GroupChevronDB.hostilesize)
+      env.slash("hostilesize 4")
+      assert.is_true(printedContains(env, "invalid hostilesize"))
+      assert.are.equal(3, env.GroupChevronDB.hostilesize)
+      env.slash("hostilenamegap")
+      assert.is_true(printedContains(env, "hostilenamegap 0 (-10 to 40, default 5)"))
+      env.slash("hostilenamegap 40")
+      assert.are.equal(40, env.GroupChevronDB.hostilenamegap)
+      env.slash("hostilenamegap 41")
+      env.slash("hostilenamegap 2.5")
+      assert.are.equal(40, env.GroupChevronDB.hostilenamegap)
+    end)
+
+    it("keeps the look on name updates, and gives Blizzard's name and colour back when the quest ends", function()
+      local env = load()
+      local plate = newTreePlate("nameplate2")
+      questHostile(env, plate)
+      -- Blizzard recolours its name: ours stays.
+      plate.UnitFrame.name:SetTextColor(1, 0, 0)
+      env.hooks.CompactUnitFrame_UpdateName(plate.UnitFrame)
+      assert.are.equal("#FFFF00", hex(env.label(plate).color))
+      assert.are.equal("#FFFF00", hex(plate.UnitFrame.name.color))
+
+      -- Blizzard colours its name again, then the objective is done: the quest log changes, and the
+      -- plates are re-checked once, later.
+      plate.UnitFrame.name:SetTextColor(unpack(BLUE))
+      env.hooks.CompactUnitFrame_UpdateName(plate.UnitFrame)
+      env.world.quests.nameplate2 = nil
+      env.fire("QUEST_LOG_UPDATE")
+      env.fire("UNIT_QUEST_LOG_CHANGED", "player")
+      assert.are.equal(1, #env.world.timers)
+      assert.are.equal("#FFFF00", hex(env.label(plate).color)) -- not yet
+      env.runTimers()
+      local _, holder = env.label(plate)
+      assert.is_false(holder.shown)
+      assert.is_false(env.chevron(plate).shown)
+      assert.are.equal(1, plate.UnitFrame.name.alpha)
+      assert.are.equal("#0080FF", hex(plate.UnitFrame.name.color))
+
+      -- A new quest ties it again.
+      env.world.quests.nameplate2 = true
+      env.fire("QUEST_ACCEPTED", 1234)
+      env.runTimers()
+      assert.are.equal("#FFFF00", hex(env.label(plate).color))
+      assert.is_true(env.chevron(plate).shown)
+      assert.are.equal(0, plate.UnitFrame.name.alpha)
+    end)
+
+    it("shows the quest chevron on the target too, and nothing is left when the plate is released", function()
+      local env = load()
+      local plate = newTreePlate("nameplate2")
+      questHostile(env, plate)
+      env.world.target = "nameplate2"
+      env.fire("PLAYER_TARGET_CHANGED")
+      assert.are.equal("#FFFF00", hex(env.label(plate).color))
+      assert.is_true(env.chevron(plate).shown)
+      env.fire("NAME_PLATE_UNIT_REMOVED", "nameplate2")
+      assert.is_false(env.chevron(plate).shown)
+      assert.are.equal(1, plate.UnitFrame.name.alpha)
+      assert.are.equal("#0080FF", hex(plate.UnitFrame.name.color))
+    end)
+
+    it("swaps the double chevron of a friend and the single one of a quest hostile on a pooled UnitFrame", function()
+      local env = load()
+      local plate = newTreePlate("nameplate2")
+      local frames = function()
+        local out = {}
+        for _, f in ipairs(env.frames) do
+          if f.parent == plate.UnitFrame and #f.textures > 0 then
+            out[#out + 1] = f
+          end
+        end
+        return out
+      end
+      -- A friend: the double chevron.
+      env.world.plates.nameplate2 = plate
+      env.world.players.nameplate2, env.world.friends.nameplate2, env.world.flist.nameplate2 = true, true, true
+      env.fire("NAME_PLATE_UNIT_ADDED", "nameplate2")
+      assert.are.equal(1, #frames())
+      assert.are.equal(2, vcount(frames()[1]))
+      assert.is_true(frames()[1].shown)
+
+      -- The UnitFrame now shows a hostile quest unit: the single "V" only.
+      env.world.players.nameplate2, env.world.friends.nameplate2, env.world.flist.nameplate2 = nil, nil, nil
+      env.world.attackable.nameplate2, env.world.quests.nameplate2 = true, true
+      env.fire("NAME_PLATE_UNIT_ADDED", "nameplate2")
+      assert.are.equal(2, #frames())
+      assert.is_false(frames()[1].shown)
+      assert.is_true(frames()[2].shown)
+      assert.are.equal(1, vcount(frames()[2]))
+      assert.are.equal("#FFFF00", hex(env.label(plate).color))
+
+      -- And back to the friend: the double chevron again, the single one hidden.
+      env.world.attackable.nameplate2, env.world.quests.nameplate2 = nil, nil
+      env.world.players.nameplate2, env.world.friends.nameplate2, env.world.flist.nameplate2 = true, true, true
+      env.fire("NAME_PLATE_UNIT_ADDED", "nameplate2")
+      assert.are.equal(2, #frames())
+      assert.is_true(frames()[1].shown)
+      assert.is_false(frames()[2].shown)
+      assert.are.equal("#3FA7FF", hex(env.label(plate).color))
+    end)
+
+    it("draws a single chevron out of rotated rectangles when the texture cannot be loaded", function()
+      textureMissing = true
+      local ok, err = pcall(function()
+        local env = load()
+        local plate = newTreePlate("nameplate2")
+        questHostile(env, plate)
+        local ch = env.chevron(plate)
+        assert.is_true(ch.shown)
+        -- Two arms (one "V"), not four.
+        local arms = 0
+        for _, t in ipairs(ch.textures) do
+          if t.color then
+            arms = arms + 1
+            assert.are.equal("#FFFF00", hex(t.color))
+          end
+        end
+        assert.are.equal(2, arms)
+        assert.is_true(printedContains(env, "chevron texture not found"))
+      end)
+      textureMissing = false
+      assert.is_true(ok, err)
+    end)
+
+    it("is listed in /gchev and /gchev debug", function()
+      local env = load()
+      local plate = newTreePlate("nameplate2")
+      questHostile(env, plate)
+      env.world.plates.target = plate
+      env.world.attackable.target, env.world.quests.target = true, true -- /gchev asks about "target"
+      env.slash("")
+      assert.is_true(printedContains(env, "hostiles (quest): colour #FFFF00, hostilechevsize 1, hostilesize 1, "
+        .. "hostilenamegap 0, 1 plate(s) marked; target quest hostile: yes (UnitIsRelatedToActiveQuest, "
+        .. "attackable true)"))
+      assert.is_true(printedContains(env, "hostilecolor #RRGGBB | hostilechevsize 1-5 | hostilesize 1-3"))
+      assert.is_true(printedContains(env, "reset | options | debug"))
+      env.slash("debug")
+      assert.is_true(printedContains(env, "debug: target quest hostile: yes (UnitIsRelatedToActiveQuest"))
+      env.world.quests.nameplate2 = nil
+      env.slash("debug")
+      assert.is_true(printedContains(env, "debug: target quest hostile: no (none, attackable true)"))
+    end)
+  end)
+
   describe("settings and options panel", function()
     -- widgetClient returns load() overrides: a Settings API stub (recording the registered
     -- category and what was opened) and CreateFrame making plain widgets for the panel.
@@ -2958,7 +3324,7 @@ describe("GroupChevron", function()
       end
     end)
 
-    it("orders the sections Group members, Friendlies, Friends, Guildmates, then Reset", function()
+    it("orders the sections Members, Friends, Guildmates, Quest hostiles, Friendlies, Reset", function()
       local overrides, rec = widgetClient()
       load({ overrides = overrides })
       local content
@@ -2978,13 +3344,15 @@ describe("GroupChevron", function()
       local friendlies = labelY("Friendlies")
       local friends = labelY("Friends")
       local guild = labelY("Guildmates")
+      local hostiles = labelY("Quest hostiles")
       assert.is_number(members)
-      assert.is_true(members > friendlies)
-      assert.is_true(friendlies > friends)
+      assert.is_true(members > friends)
       assert.is_true(friends > guild)
+      assert.is_true(guild > hostiles)
+      assert.is_true(hostiles > friendlies)
       -- Reset sits below the last section.
       local reset = widget(rec, "Button", 2)
-      assert.is_true(guild > reset.points[1][5])
+      assert.is_true(friendlies > reset.points[1][5])
     end)
 
     it("draws one bordered frame per option group, without overlap, above the Reset button", function()
@@ -3002,7 +3370,9 @@ describe("GroupChevron", function()
           boxes[#boxes + 1] = c.f
         end
       end
-      assert.are.equal(4, #boxes)
+      assert.are.equal(5, #boxes)
+      -- Created in a different order than they are laid out: from the top down.
+      table.sort(boxes, function(a, b) return a.points[1][5] > b.points[1][5] end)
       for i, b in ipairs(boxes) do
         -- No SetBackdrop in the fake client: the four texture lines are the border.
         assert.are.equal(4, #b.textures)
@@ -3011,7 +3381,7 @@ describe("GroupChevron", function()
           assert.is_true(prev.points[1][5] - prev.h > b.points[1][5])
         end
       end
-      local last = boxes[4]
+      local last = boxes[5]
       local reset = widget(rec, "Button", 2)
       assert.is_true(last.points[1][5] - last.h > reset.points[1][5])
     end)
@@ -3028,7 +3398,7 @@ describe("GroupChevron", function()
         return decorate(f, kind, parent, template)
       end
       load({ overrides = overrides })
-      assert.are.equal(4, #seen)
+      assert.are.equal(5, #seen)
       assert.are.equal(1, seen[1].edgeSize)
       assert.is_not_nil(rec.created)
     end)
@@ -3133,7 +3503,22 @@ describe("GroupChevron", function()
       gap.value = 12
       gap.scripts.OnMouseUp(gap)
       assert.are.equal(12, env.GroupChevronDB.namegap)
-      assert.is_nil(widget(rec, "Slider", 9))
+      -- Then the hostiles' chevron size (1..5), text size (1..3) and name gap (-10..40).
+      local hostileChev, hostileText = widget(rec, "Slider", 12), widget(rec, "Slider", 13)
+      local hostileGap = widget(rec, "Slider", 14)
+      hostileChev.scripts.OnValueChanged(hostileChev, 4.5)
+      assert.are.equal(4.5, env.GroupChevronDB.hostilechevsize)
+      hostileChev.scripts.OnValueChanged(hostileChev, 5.5)
+      assert.are.equal(4.5, env.GroupChevronDB.hostilechevsize)
+      hostileText.scripts.OnValueChanged(hostileText, 2.5)
+      assert.are.equal(2.5, env.GroupChevronDB.hostilesize)
+      hostileText.scripts.OnValueChanged(hostileText, 3.5)
+      assert.are.equal(2.5, env.GroupChevronDB.hostilesize)
+      hostileGap.scripts.OnValueChanged(hostileGap, 7.4)
+      assert.are.equal(7, env.GroupChevronDB.hostilenamegap)
+      hostileGap.scripts.OnValueChanged(hostileGap, 41)
+      assert.are.equal(7, env.GroupChevronDB.hostilenamegap)
+      assert.is_nil(widget(rec, "Slider", 18))
       assert.are.equal(2.25, env.GroupChevronDB.textsize)
 
       -- The panel shows the saved gaps when it opens.
@@ -3170,6 +3555,10 @@ describe("GroupChevron", function()
       env.slash("otherbarsize 2")
       env.slash("namegap 7")
       env.slash("othernamegap -2")
+      env.slash("hostilecolor #00ff00")
+      env.slash("hostilechevsize 2")
+      env.slash("hostilesize 2")
+      env.slash("hostilenamegap -2")
       env.slash("compact off")
       env.slash("off")
       env.slash("reset")
@@ -3192,10 +3581,38 @@ describe("GroupChevron", function()
       assert.are.equal(1, db.otherbarsize)
       assert.are.equal(5, db.namegap)
       assert.are.equal(5, db.othernamegap)
+      assert.are.equal("#FFFF00", hex(db.hostilecolor))
+      assert.are.equal(3, db.hostilechevsize)
+      assert.are.equal(1, db.hostilesize)
+      assert.are.equal(5, db.hostilenamegap)
       assert.are.equal("outline", db.font)
       assert.is_true(db.classcolor)
       assert.is_true(db.enabled)
       assert.is_true(db.compact)
+    end)
+
+    it("has a Hostiles section with a colour swatch and shows the saved values when it opens", function()
+      local overrides, rec = widgetClient()
+      local env = load({ overrides = overrides })
+      local swatch = widget(rec, "Button", 5)
+      swatch.scripts.OnClick(swatch)
+      assert.are.equal("#FFFF00", hex({ rec.picker.r, rec.picker.g, rec.picker.b }))
+      rec.rgb = { 0, 1, 0 }
+      rec.picker.swatchFunc()
+      assert.are.equal("#00FF00", hex(env.GroupChevronDB.hostilecolor))
+      rec.picker.cancelFunc()
+      assert.are.equal("#FFFF00", hex(env.GroupChevronDB.hostilecolor))
+      -- The member colour is untouched, and the other swatches keep their order.
+      assert.are.equal("#FF4FD8", hex(env.GroupChevronDB.color))
+      assert.are.equal("#3FA7FF", hex(env.GroupChevronDB.friendcolor))
+
+      env.slash("hostilechevsize 4")
+      env.slash("hostilesize 2")
+      env.slash("hostilenamegap 9")
+      rec.frame.scripts.OnShow(rec.frame)
+      assert.are.equal(4, widget(rec, "Slider", 12).value)
+      assert.are.equal(2, widget(rec, "Slider", 13).value)
+      assert.are.equal(9, widget(rec, "Slider", 14).value)
     end)
 
     it("has a Friends section with a colour swatch and two checkboxes", function()
@@ -3289,11 +3706,51 @@ describe("GroupChevron", function()
       assert.are.equal("#00FFFF", hex(plate.UnitFrame.name.color))
     end)
 
+    it("redraws the chevron previews with the outline thickness while its slider is dragged", function()
+      local overrides, rec = widgetClient()
+      local env = load({ overrides = overrides })
+      rec.frame.scripts.OnShow(rec.frame)
+      local owned = {}
+      for _, c in ipairs(rec.created) do
+        for _, t in ipairs(c.f.textures or {}) do
+          if t.owner then
+            owned[#owned + 1] = t
+          end
+        end
+      end
+      -- Members, friends and guildmates: two "V"s of eight copies each; hostiles: one "V".
+      assert.are.equal(3 * 16 + 8, #owned)
+      local hostile = {}
+      for i = #owned - 7, #owned do
+        hostile[#hostile + 1] = owned[i]
+      end
+      assert.is_true(hostile[1].shown)
+      -- Thickness 2 at chevron size 1 (these specs): 0.1875 * 2 * 1 points to the right for the first copy.
+      assert.is_true(math.abs(hostile[1].points[1][4] - 0.375) < 1e-9)
+      local slider = widget(rec, "Slider", 15)
+      slider.scripts.OnMouseDown(slider)
+      slider.scripts.OnValueChanged(slider, 3)
+      assert.is_true(math.abs(hostile[1].points[1][4] - 0.5625) < 1e-9)
+      assert.are.equal(2, env.GroupChevronDB.hostileoutlinesize) -- not saved before the release
+      -- The chevron size slider resizes the preview too (the square is 72 wide, the "V" 10 * size).
+      assert.are.equal(10, hostile[1].w)
+      local size = widget(rec, "Slider", 12)
+      size.scripts.OnValueChanged(size, 5)
+      assert.are.equal(50, hostile[1].w)
+      assert.are.equal(25, hostile[1].owner.h)
+      size.scripts.OnValueChanged(size, 1)
+      assert.are.equal(10, hostile[1].w)
+      slider.scripts.OnValueChanged(slider, 0)
+      assert.is_false(hostile[1].shown)
+      slider.scripts.OnValueChanged(slider, 4)
+      assert.is_true(hostile[1].shown)
+    end)
+
     it("has a Show level checkbox in the Friendlies section, reset by Reset to defaults", function()
       local overrides, rec = widgetClient()
       local env = load({ overrides = overrides })
       local levelBox = widget(rec, "CheckButton", 7)
-      assert.is_nil(widget(rec, "CheckButton", 8))
+      assert.is_nil(widget(rec, "CheckButton", 12))
       rec.frame.scripts.OnShow(rec.frame)
       assert.is_true(levelBox.checked)
       levelBox.checked = false
@@ -3330,7 +3787,7 @@ describe("GroupChevron", function()
 
       -- The options button cycles to the next font.
       rec.frame.scripts.OnShow(rec.frame)
-      local button = widget(rec, "Button", 5)
+      local button = widget(rec, "Button", 6)
       button.scripts.OnClick(button)
       assert.are.equal("chat", env.GroupChevronDB.font)
       assert.are.equal(CHAT, label.fontObject)
@@ -3357,7 +3814,7 @@ describe("GroupChevron", function()
       local env = load({ overrides = overrides })
       rec.frame.scripts.OnShow(rec.frame)
       assert.are.equal(Core.FONTS[1].label, texts[#texts])
-      assert.is_nil(widget(rec, "Button", 5)) -- no fallback button
+      assert.is_nil(widget(rec, "Button", 6)) -- no fallback button (Button 5 is the hostile swatch)
 
       init()
       assert.are.equal(#Core.FONTS, #added)
@@ -3387,7 +3844,7 @@ describe("GroupChevron", function()
       overrides.UIDropDownMenu_SetText = function() end
       local env = load({ overrides = overrides })
       rec.frame.scripts.OnShow(rec.frame)
-      local button = widget(rec, "Button", 5)
+      local button = widget(rec, "Button", 6)
       button.scripts.OnClick(button)
       assert.are.equal("outline", env.GroupChevronDB.font)
     end)
