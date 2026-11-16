@@ -44,6 +44,8 @@ python3 tools/curseforge_icon_png.py assets/curseforge-icon.png
 
 Bump `## Version` in `GroupChevron/GroupChevron.toc` with every change to the addon (patch for fixes, minor for features).
 
+To release, run **Actions -> Release -> Run workflow** on main: it releases the `## Version` already committed in the `.toc` (nothing to choose) and fails if that version has already been released. "Dry run" only checks and tests.
+
 ## Disclaimer
 
 This is a personal project, and its real purpose is to experiment with AI-assisted coding. The WoW addon is mostly a harmless playground for that: small, low-stakes and easy to test. It was built with AI on purpose, and that's the point of it. Use it if it's useful to you; if it isn't, no hard feelings.
