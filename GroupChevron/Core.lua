@@ -18,6 +18,8 @@ Core.DEFAULT_COLOR = { 255 / 255, 79 / 255, 216 / 255 }
 Core.DEFAULT_FRIEND_COLOR = { 63 / 255, 167 / 255, 255 / 255 }
 -- DEFAULT_GUILD_COLOR is #40FF40 (guild chat green): guildmates outside the group.
 Core.DEFAULT_GUILD_COLOR = { 64 / 255, 255 / 255, 64 / 255 }
+-- DEFAULT_HOSTILE_COLOR is #FFFF00 (yellow): hostile units tied to one of the player's quests.
+Core.DEFAULT_HOSTILE_COLOR = { 255 / 255, 255 / 255, 0 / 255 }
 
 local function finite(v)
   return type(v) == "number" and v == v and v ~= math.huge and v ~= -math.huge
@@ -74,20 +76,26 @@ function Core.CopyDefaultGuildColor()
   return { Core.DEFAULT_GUILD_COLOR[1], Core.DEFAULT_GUILD_COLOR[2], Core.DEFAULT_GUILD_COLOR[3] }
 end
 
+-- CopyDefaultHostileColor returns a new table holding the default hostile (quest) colour.
+function Core.CopyDefaultHostileColor()
+  return { Core.DEFAULT_HOSTILE_COLOR[1], Core.DEFAULT_HOSTILE_COLOR[2], Core.DEFAULT_HOSTILE_COLOR[3] }
+end
+
 -- ValidColor is true for a table { r, g, b } of numbers in 0..1.
 function Core.ValidColor(c)
   return type(c) == "table" and isUnit(c[1]) and isUnit(c[2]) and isUnit(c[3])
 end
 
--- Size factors of the chevron and of the name text (group members only): 1 (default) to 3,
--- except the chevron size (chevsize), which goes up to 5.
+-- Size factors of the chevron and of the name text: 1 (default) to 3, except the chevron sizes
+-- (chevsize, and hostilechevsize for the single chevron of the hostiles), which go up to 5.
 Core.MIN_FACTOR = 1
 Core.DEFAULT_MAX_FACTOR = 3
-Core.MAX_FACTORS = { chevsize = 5 }
+Core.MAX_FACTORS = { chevsize = 5, hostilechevsize = 5 }
 Core.DEFAULT_FACTOR = 1
 -- DEFAULT_FACTORS are the defaults of the kinds that do not start at DEFAULT_FACTOR (1, which
--- also stays the "no scaling" value the plates compare against).
-Core.DEFAULT_FACTORS = { chevsize = 3, textsize = 1.75, buffsize = 1.1 }
+-- also stays the "no scaling" value the plates compare against). The hostiles start where the
+-- friendlies do: the chevron at the size the friends' chevron has (chevsize), the text at 1.
+Core.DEFAULT_FACTORS = { chevsize = 3, textsize = 1.75, buffsize = 1.1, hostilechevsize = 3 }
 
 -- DefaultFactor is the default of a factor kind: its DEFAULT_FACTORS entry, else DEFAULT_FACTOR.
 function Core.DefaultFactor(kind)
@@ -135,13 +143,13 @@ end
 -- Name gaps: how far up (positive) or down (negative) our name label sits from where Blizzard
 -- puts its name above the health bar, in whole UI points (the parent's units, not scaled by the
 -- text size): "namegap" for group members, "othernamegap" for other friendly players (compact
--- or not, the target included, like othersize). 0 is the layout without a gap (NO_GAP); the
--- default of both kinds is DEFAULT_GAP.
+-- or not, the target included, like othersize), "hostilenamegap" for the hostiles tied to a
+-- quest. 0 is the layout without a gap (NO_GAP); the default of every kind is DEFAULT_GAP.
 Core.MIN_GAP = -10
 Core.MAX_GAP = 40
 Core.NO_GAP = 0
 Core.DEFAULT_GAP = 5
-Core.GAP_KINDS = { namegap = true, othernamegap = true }
+Core.GAP_KINDS = { namegap = true, othernamegap = true, hostilenamegap = true }
 
 -- DefaultGap is the default of a gap kind.
 function Core.DefaultGap(_)
@@ -258,6 +266,7 @@ Core.Locales = {
     friendlies = "Friendlies (friendly players outside your group)",
     friends = "Friends (on your friends list, outside your group)",
     guildmates = "Guildmates (in your guild, outside your group)",
+    hostiles = "Hostiles (enemies tied to your quests)",
     compact = "Compact plates (name only)",
     name_colour = "Name colour",
     name_font = "Name font",
@@ -278,6 +287,7 @@ Core.Locales = {
     friendlies = "Joueurs amicaux (hors de votre groupe)",
     friends = "Amis (sur votre liste d'amis, hors de votre groupe)",
     guildmates = "Membres de la guilde (hors de votre groupe)",
+    hostiles = "Hostiles (ennemis liés à vos quêtes)",
     compact = "Plaques compactes (nom seul)",
     name_colour = "Couleur du nom",
     name_font = "Police du nom",
@@ -318,12 +328,13 @@ function Core.InitDB(db)
   if type(db) ~= "table" then
     db = {}
   end
-  for _, key in ipairs({ "chevsize", "textsize", "othersize", "barsize", "buffsize", "otherbarsize" }) do
+  for _, key in ipairs({ "chevsize", "textsize", "othersize", "barsize", "buffsize", "otherbarsize",
+    "hostilechevsize", "hostilesize" }) do
     if not Core.ValidFactor(db[key], key) then
       db[key] = Core.DefaultFactor(key)
     end
   end
-  for _, key in ipairs({ "namegap", "othernamegap" }) do
+  for _, key in ipairs({ "namegap", "othernamegap", "hostilenamegap" }) do
     if not Core.ValidGap(db[key]) then
       db[key] = Core.DefaultGap(key)
     end
@@ -351,6 +362,11 @@ function Core.InitDB(db)
     db.guildcolor = Core.CopyDefaultGuildColor()
   else
     db.guildcolor = { db.guildcolor[1], db.guildcolor[2], db.guildcolor[3] }
+  end
+  if not Core.ValidColor(db.hostilecolor) then
+    db.hostilecolor = Core.CopyDefaultHostileColor()
+  else
+    db.hostilecolor = { db.hostilecolor[1], db.hostilecolor[2], db.hostilecolor[3] }
   end
   for _, key in ipairs({ "friendchevron", "bnetfriends", "guildchevron", "showlevel" }) do
     if type(db[key]) ~= "boolean" then
@@ -516,6 +532,26 @@ function Core.GuildLookup(api, unit, guid)
   return false, "missing"
 end
 
+-- QuestLookup tells whether unit is tied to one of the player's active quests (an enemy to kill,
+-- one that drops a quest item, an object to use, ...): api.IsRelatedToActiveQuest(unit), i.e.
+-- C_QuestLog.UnitIsRelatedToActiveQuest. It returns the answer and its source:
+--   "unit"    : the API answered true;
+--   "none"    : not tied to a quest (also when the API raises an error or returns a secret value);
+--   "missing" : the API does not exist on this client.
+-- Anything unknown counts as "not tied to a quest".
+function Core.QuestLookup(api, unit)
+  if type(api) ~= "table" or type(api.IsRelatedToActiveQuest) ~= "function" then
+    return false, "missing"
+  end
+  if type(unit) ~= "string" or unit == "" or isSecret(api, unit) then
+    return false, "none"
+  end
+  if call(api, "IsRelatedToActiveQuest", unit) == true then
+    return true, "unit"
+  end
+  return false, "none"
+end
+
 -- readRGB returns the r, g, b (numbers in 0..1, none secret) of a class colour c: a ColorMixin
 -- (c:GetRGB()) or a table with fields r, g, b (RAID_CLASS_COLORS), or nil.
 local function readRGB(api, c)
@@ -571,16 +607,20 @@ function Core.ClassColor(api, unit)
 end
 
 -- UnitInfo gathers what PlateMode needs about unit. api holds the injected WoW functions of
--- IsGroupMember plus UnitIsFriend, UnitGUID and those of FriendLookup, GuildLookup and
--- ClassColor. Each of member, player, self (the unit is the player), friend
--- (UnitIsFriend("player", unit)) and target (UnitIsUnit(unit, "target")) is true, false or nil
--- (unknown: missing function, error or secret value). listed is true only when FriendLookup says
+-- IsGroupMember plus UnitIsFriend, UnitCanAttack, UnitGUID and those of FriendLookup,
+-- GuildLookup, QuestLookup and ClassColor. Each of member, player, self (the unit is the player),
+-- friend (UnitIsFriend("player", unit)), attackable (UnitCanAttack("player", unit): hostile and
+-- neutral units alike) and target (UnitIsUnit(unit, "target")) is true, false or nil (unknown:
+-- missing function, error or secret value). quest is true only for an attackable unit that
+-- QuestLookup says is tied to an active quest, and questSource is its source ("skipped" when the
+-- unit is not known to be attackable: the quest API is then not asked). listed is true only when FriendLookup says
 -- the unit's GUID is a friend (Battle.net friends only with settings.bnetfriends), and source is
 -- its source; guild and guildSource are GuildLookup's answer and source. Only with
 -- settings.classcolor: class is the class token and classColor { r, g, b } its colour (nil
 -- when unknown); without the setting the class is never asked.
 function Core.UnitInfo(api, unit, settings)
-  local info = { listed = false, source = "missing", guild = false, guildSource = "missing" }
+  local info = { listed = false, source = "missing", guild = false, guildSource = "missing", quest = false,
+    questSource = "skipped" }
   if type(api) ~= "table" or type(unit) ~= "string" or unit == "" or isSecret(api, unit) then
     return info
   end
@@ -599,6 +639,13 @@ function Core.UnitInfo(api, unit, settings)
   ok, v = known(api, "UnitIsFriend", "player", unit)
   if ok then
     info.friend = v
+  end
+  ok, v = known(api, "UnitCanAttack", "player", unit)
+  if ok then
+    info.attackable = v
+  end
+  if info.attackable == true then
+    info.quest, info.questSource = Core.QuestLookup(api, unit)
   end
   if Core.IsGroupMember(api, unit) then
     info.member = true
@@ -630,6 +677,16 @@ end
 -- group member nor the player (exact booleans only).
 local function friendly(info)
   return info.member == false and info.player == true and info.self == false and info.friend == true
+end
+
+-- QuestHostile is true when the plate of the unit described by info (see UnitInfo) is a unit the
+-- player can attack that is tied to one of the player's active quests, and the addon is on
+-- (settings.enabled). Only exact boolean answers count.
+function Core.QuestHostile(info, settings)
+  if type(info) ~= "table" or type(settings) ~= "table" or settings.enabled ~= true then
+    return false
+  end
+  return info.attackable == true and info.self ~= true and info.quest == true
 end
 
 -- Relation returns how the player relates to the unit described by info (see UnitInfo), in
@@ -687,13 +744,19 @@ end
 --   "class"   : another friendly player (not a friend) who is the target, or any with compact
 --               off, whose name gets the class colour (NameColor "class"): full plate, name in
 --               the class colour, no chevron (relation nil);
---   "default" : everything else (addon off, compact off, enemies, NPCs, the target, anything
---               unknown): the plate as the game draws it.
+--   "quest"   : a hostile (attackable) unit tied to one of the player's active quests
+--               (QuestHostile): full plate, name in the hostile colour, single chevron; no
+--               relation (nil). Such a unit is never a member, friend or friendly player.
+--   "default" : everything else (addon off, compact off, other enemies, NPCs, the target,
+--               anything unknown): the plate as the game draws it.
 -- Only the exact boolean answers count, so an unknown or secret value gives "default" (or, for
 -- a friend whose target state is unknown, the full "friend" plate: never compact).
 function Core.PlateMode(info, settings)
   if type(info) ~= "table" or type(settings) ~= "table" or settings.enabled ~= true then
     return "default", nil
+  end
+  if Core.QuestHostile(info, settings) then
+    return "quest", nil
   end
   local relation = Core.Relation(info, settings)
   if relation == "member" then

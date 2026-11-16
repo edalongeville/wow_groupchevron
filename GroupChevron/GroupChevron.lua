@@ -13,6 +13,9 @@
 -- ("Name (??)" when the client does not know it), drawn by our own name FontString. A shown
 -- health bar (full plates, the target, a hurt compact plate) has Blizzard's level beside it, so
 -- the suffix is left out there; when the bar's state cannot be told, the suffix stays.
+-- A hostile (attackable) unit tied to one of the player's active quests (C_QuestLog.UnitIsRelatedToActiveQuest:
+-- kill, item drop, ...) gets its name in the hostile colour (default #FFFF00) and a single "V"
+-- chevron above it, in that colour; the rest of its plate is left as Blizzard draws it.
 --
 -- Robustness rules (fully independent of any other addon):
 --   * Every event handler, hook and slash command runs through SafeCall (pcall): an error
@@ -49,6 +52,9 @@ local LOWER_ALPHA = 0.5
 local GAP = 2 -- between the top of the name and the bottom of the chevron
 local CHEVRON_WIDTH = V_WIDTH
 local CHEVRON_HEIGHT = V_HEIGHT + STEP
+-- The hostiles' chevron is a single "V" (the upper one of the double chevron, fully opaque), as
+-- tall as one "V".
+local SINGLE_HEIGHT = V_HEIGHT
 local ARM_LENGTH = 6
 local ARM_THICKNESS = 1.5
 local ARM_ANGLE = 40
@@ -69,8 +75,11 @@ local lastNameField -- the field name found on the last marked plate ("" = none 
 -- 0.6.1), a UnitFrame could come back from the pool under another plate, an enemy's say,
 -- with Blizzard's name still faded: enemies without a name.
 
--- chevrons: UnitFrame -> chevron frame (its child, created once, lazily).
+-- chevrons: UnitFrame -> chevron frame (its child, created once, lazily). singles is the same for
+-- the hostiles' single chevron: a pooled UnitFrame may show either shape in turn, so each shape
+-- has its own frame and the other one is hidden.
 local chevrons = setmetatable({}, { __mode = "k" })
+local singles = setmetatable({}, { __mode = "k" })
 -- marks: UnitFrame -> { fs = name FontString or nil, orig = Blizzard's { r, g, b, a } or nil,
 -- applied = our last { r, g, b } } while its plate is marked.
 local marks = setmetatable({}, { __mode = "k" })
@@ -176,6 +185,10 @@ local unitAPI = {
   UnitInRaid = UnitInRaid,
   UnitIsUnit = UnitIsUnit,
   UnitIsFriend = UnitIsFriend,
+  -- Hostiles: UnitCanAttack("player", unit), then C_QuestLog.UnitIsRelatedToActiveQuest(unit)
+  -- (a boolean, documented for the Forever client 1.60.1); missing = no hostile is ever marked.
+  UnitCanAttack = UnitCanAttack,
+  IsRelatedToActiveQuest = Field(C_QuestLog, "UnitIsRelatedToActiveQuest"),
   UnitGUID = UnitGUID,
   UnitHealth = UnitHealth,
   UnitHealthMax = UnitHealthMax,
@@ -235,6 +248,15 @@ local function GuildColor()
   return c[1], c[2], c[3]
 end
 
+-- HostileColor returns the hostile colour (hostile units tied to a quest).
+local function HostileColor()
+  if type(db) == "table" and Core.ValidColor(db.hostilecolor) then
+    return db.hostilecolor[1], db.hostilecolor[2], db.hostilecolor[3]
+  end
+  local c = Core.DEFAULT_HOSTILE_COLOR
+  return c[1], c[2], c[3]
+end
+
 -- FLAG_DEFAULTS are the saved on/off settings (besides enabled and compact) and their default.
 local FLAG_DEFAULTS = {
   friendchevron = true, bnetfriends = true, guildchevron = true, classcolor = Core.DEFAULT_CLASSCOLOR, showlevel = true,
@@ -251,7 +273,8 @@ end
 -- Factor returns a saved size factor (Core.DefaultFactor when missing or invalid): "chevsize"; for group
 -- members "textsize", "barsize" (health bar), "buffsize" (auras); for other friendly players
 -- (compact or not, the target included, see Core.OtherSizes) "othersize" (name) and
--- "otherbarsize" (health bar, shown while hurt when compact).
+-- "otherbarsize" (health bar, shown while hurt when compact); for the hostiles tied to a quest
+-- "hostilechevsize" (their single chevron) and "hostilesize" (name).
 local function Factor(key)
   if type(db) == "table" and Core.ValidFactor(db[key], key) then
     return db[key]
@@ -260,7 +283,8 @@ local function Factor(key)
 end
 
 -- Gap returns a saved name gap (Core.DefaultGap when missing or invalid, see Core.ValidGap):
--- "namegap" for group members, "othernamegap" for other friendly players (wherever othersize applies).
+-- "namegap" for group members, "othernamegap" for other friendly players (wherever othersize applies),
+-- "hostilenamegap" for the hostiles tied to a quest.
 local function Gap(key)
   if type(db) == "table" and Core.ValidGap(db[key]) then
     return db[key]
@@ -379,12 +403,12 @@ end
 -- LayoutChevron (re)sizes the whole chevron for the saved chevsize; a no-op when unchanged.
 -- The GAP above the name is not scaled (it is the frame's anchor offset).
 local function LayoutChevron(frame)
-  local f = Factor("chevsize")
+  local f = Factor(frame.single and "hostilechevsize" or "chevsize")
   if frame.factor == f then
     return
   end
   frame.factor = f
-  frame:SetSize(CHEVRON_WIDTH * f, CHEVRON_HEIGHT * f)
+  frame:SetSize(CHEVRON_WIDTH * f, (frame.single and SINGLE_HEIGHT or CHEVRON_HEIGHT) * f)
   for _, tex in ipairs(frame.vs) do
     tex:SetSize(V_WIDTH * f, V_HEIGHT * f)
     tex:ClearAllPoints()
@@ -431,10 +455,12 @@ local function ColorChevron(frame, r, g, b)
   end
 end
 
--- GetChevron returns the plate's chevron frame, creating it on first use. It is a child of
+-- GetChevron returns the plate's chevron frame, creating it on first use: the double chevron
+-- of members, friends and guildmates, or with single the hostiles' single "V". It is a child of
 -- the plate's UnitFrame, so it fades and hides with the plate.
-local function GetChevron(plate, uf)
-  local frame = chevrons[plate]
+local function GetChevron(plate, uf, single)
+  local cache = single and singles or chevrons
+  local frame = cache[plate]
   if frame then
     return frame
   end
@@ -443,19 +469,41 @@ local function GetChevron(plate, uf)
   end
   frame = CreateFrame("Frame", nil, uf)
   frame.vs, frame.arms = {}, {}
-  if not (AddV(frame, STEP, 1) and AddV(frame, 0, LOWER_ALPHA)) then
+  frame.single = single and true or false
+  local drawn
+  if single then
+    drawn = AddV(frame, 0, 1)
+  else
+    drawn = AddV(frame, STEP, 1) and AddV(frame, 0, LOWER_ALPHA)
+  end
+  if not drawn then
     frame.vs = {}
     NoticeOnce("notexture", "chevron texture not found (restart the game after an update): drawing a simpler chevron")
     local bottom = ARM_THICKNESS / 2
-    AddArm(frame, -1, bottom + STEP, 1)
-    AddArm(frame, 1, bottom + STEP, 1)
-    AddArm(frame, -1, bottom, LOWER_ALPHA)
-    AddArm(frame, 1, bottom, LOWER_ALPHA)
+    if single then
+      AddArm(frame, -1, bottom, 1)
+      AddArm(frame, 1, bottom, 1)
+    else
+      AddArm(frame, -1, bottom + STEP, 1)
+      AddArm(frame, 1, bottom + STEP, 1)
+      AddArm(frame, -1, bottom, LOWER_ALPHA)
+      AddArm(frame, 1, bottom, LOWER_ALPHA)
+    end
   end
   LayoutChevron(frame)
   frame:Hide()
-  chevrons[plate] = frame
+  cache[plate] = frame
   return frame
+end
+
+-- HideChevrons hides the plate's chevrons, except keep (the one a style shows, or nil).
+local function HideChevrons(plate, keep)
+  for _, cache in ipairs({ chevrons, singles }) do
+    local frame = cache[plate]
+    if frame and frame ~= keep then
+      frame:Hide()
+    end
+  end
 end
 
 -- ---------------------------------------------------------------------------------------
@@ -829,9 +877,9 @@ end
 
 -- Styles of a marked plate (see Mark):
 --   kind    : "member", "friend" / "class" (full plate) or "friendcompact" / "classcompact"
---             (with compact mode);
+--             (with compact mode), "quest" (a hostile unit tied to a quest);
 --   r, g, b : the name and chevron colour;
---   chevron : whether the chevron is shown;
+--   chevron : whether the chevron is shown (single: the hostiles' single "V", not the double one);
 --   size    : the scale of our name frame;
 --   scales  : whether the member sizes (barsize, buffsize, and the name lift) apply;
 --   bar     : the health bar scale (otherbarsize) of another friendly player's full plate, or nil
@@ -904,6 +952,17 @@ local function ClassStyle(c, compact, level)
   }
 end
 
+-- HostileStyle is the look of a hostile unit tied to a quest: its full plate as Blizzard draws it,
+-- with our name in the hostile colour at hostilesize and hostilenamegap and a single chevron
+-- (hostilechevsize) in the same colour.
+local function HostileStyle()
+  local r, g, b = HostileColor()
+  return {
+    kind = "quest", r = r, g = g, b = b, chevron = true, single = true, size = Factor("hostilesize"),
+    scales = false, gap = Gap("hostilenamegap"),
+  }
+end
+
 -- RelationStyle returns the style of a friend or guildmate plate.
 local function RelationStyle(relation, compact, level)
   if relation == "guild" then
@@ -948,22 +1007,20 @@ local function Mark(plate, uf, style)
     local lift = style.scales and BuffLift(plate, uf) or 0
     anchor = ShowFullName(plate, uf, fs, style.size, r, g, b, lift, style.gap, style.level) or fs
   end
-  if style.chevron then
-    local chevron = GetChevron(plate, uf)
-    if chevron then
-      chevron:ClearAllPoints()
-      if anchor then
-        chevron:SetPoint("BOTTOM", anchor, "TOP", 0, GAP)
-      else
-        chevron:SetPoint("BOTTOM", uf, "TOP", 0, GAP)
-      end
-      LayoutChevron(chevron)
-      ColorChevron(chevron, r, g, b)
-      chevron:Show()
+  local chevron = style.chevron and GetChevron(plate, uf, style.single) or nil
+  if chevron then
+    chevron:ClearAllPoints()
+    if anchor then
+      chevron:SetPoint("BOTTOM", anchor, "TOP", 0, GAP)
+    else
+      chevron:SetPoint("BOTTOM", uf, "TOP", 0, GAP)
     end
-  elseif chevrons[plate] then
-    chevrons[plate]:Hide()
+    LayoutChevron(chevron)
+    ColorChevron(chevron, r, g, b)
+    chevron:Show()
   end
+  -- A pooled UnitFrame may carry the other shape from its previous plate.
+  HideChevrons(plate, chevron)
   if style.scales then
     ScaleBar(plate, uf, BarPart(uf), Factor("barsize"))
     ScalePart(plate, AuraPart(uf), Factor("buffsize"))
@@ -978,10 +1035,7 @@ end
 -- had before; without it (the plate now shows another unit, which Blizzard has coloured or
 -- will colour), the colour is left alone.
 local function Unmark(plate, restore)
-  local chevron = chevrons[plate]
-  if chevron then
-    chevron:Hide()
-  end
+  HideChevrons(plate, nil)
   HideFullName(plate)
   if marks[plate] then
     RestoreScales(plate)
@@ -1133,9 +1187,10 @@ local function CompactParts(plate, uf, showHealth)
   if chain[#chain] ~= uf then
     return nil
   end
-  local chevron = chevrons[plate]
-  if chevron then
-    keep[chevron] = true
+  for _, cache in ipairs({ chevrons, singles }) do
+    if cache[plate] then
+      keep[cache[plate]] = true
+    end
   end
   if labels[plate] then
     keep[labels[plate].frame] = true
@@ -1303,7 +1358,7 @@ local function Info(unit)
   return Core.UnitInfo(unitAPI, unit, ModeSettings())
 end
 
--- Mode returns the plate mode of unit ("member", "friend", "class", "compact" or "default"),
+-- Mode returns the plate mode of unit ("member", "quest", "friend", "class", "compact" or "default"),
 -- its relation ("member", "friend" or nil), see Core.PlateMode, and the info it was read from.
 local function Mode(unit)
   local info = Info(unit)
@@ -1369,6 +1424,10 @@ local function Apply(uf, unit, restore)
   if mode == "member" then
     Uncompact(uf)
     Mark(uf, uf, MemberStyle())
+  elseif mode == "quest" then
+    -- A hostile unit tied to a quest: full plate, our name and single chevron in the hostile colour.
+    Uncompact(uf)
+    Mark(uf, uf, HostileStyle())
   elseif mode == "friend" then
     -- Full plates never get the level: Blizzard's health bar shows it.
     Uncompact(uf)
@@ -1600,6 +1659,16 @@ local function SetGuildColor(r, g, b)
   return true
 end
 
+-- SetHostileColor takes r, g, b in 0..1.
+local function SetHostileColor(r, g, b)
+  if type(db) ~= "table" or not Core.ValidColor({ r, g, b }) then
+    return false
+  end
+  db.hostilecolor = { r, g, b }
+  Changed()
+  return true
+end
+
 -- SetFlag sets one of FLAG_DEFAULTS from true/false or the text "on"/"off".
 local function SetFlag(kind, value)
   if type(db) ~= "table" or FLAG_DEFAULTS[kind] == nil then
@@ -1619,6 +1688,7 @@ end
 -- FACTOR_KINDS are the size settings SetFactor accepts.
 local FACTOR_KINDS = {
   chevsize = true, textsize = true, othersize = true, barsize = true, buffsize = true, otherbarsize = true,
+  hostilechevsize = true, hostilesize = true,
 }
 
 -- SetFactor sets one of FACTOR_KINDS from a number (the panel's slider) or a
@@ -1641,7 +1711,7 @@ local function SetFactor(kind, value)
   return true
 end
 
--- SetGap sets one of Core.GAP_KINDS (namegap, othernamegap) from a number (the panel's slider,
+-- SetGap sets one of Core.GAP_KINDS (namegap, othernamegap, hostilenamegap) from a number (the panel's slider,
 -- rounded to a whole point) or a text (the slash command, a whole number). Out of range or
 -- invalid: refused, nothing changes.
 local function SetGap(kind, value)
@@ -1696,12 +1766,14 @@ local function ResetAll()
   db.bnetfriends = true
   db.guildcolor = Core.CopyDefaultGuildColor()
   db.guildchevron = true
+  db.hostilecolor = Core.CopyDefaultHostileColor()
   db.classcolor = Core.DEFAULT_CLASSCOLOR
   db.showlevel = true
-  for _, key in ipairs({ "chevsize", "textsize", "othersize", "barsize", "buffsize", "otherbarsize" }) do
+  for _, key in ipairs({ "chevsize", "textsize", "othersize", "barsize", "buffsize", "otherbarsize",
+    "hostilechevsize", "hostilesize" }) do
     db[key] = Core.DefaultFactor(key)
   end
-  for _, key in ipairs({ "namegap", "othernamegap" }) do
+  for _, key in ipairs({ "namegap", "othernamegap", "hostilenamegap" }) do
     db[key] = Core.DefaultGap(key)
   end
   db.font = Core.DEFAULT_FONT
@@ -1744,7 +1816,7 @@ local function BuildPanel()
   scroll:SetPoint("TOPLEFT", panel, "TOPLEFT", 0, -4)
   scroll:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -28, 4)
   local content = CreateFrame("Frame", nil, scroll)
-  content:SetSize(600, 840)
+  content:SetSize(600, 1040)
   scroll:SetScrollChild(content)
 
   local function Label(text, x, y, template)
@@ -1860,9 +1932,10 @@ local function BuildPanel()
 
   -- Layout: Enabled, then the "Group members" settings, then the "Friendlies" ones
   -- (friendly players outside the group), then the "Friends" ones (friends list, outside the
-  -- group), then the "Guildmates" ones (in your guild, outside the group), then Reset. The specs find widgets
-  -- by creation order, so the Friends widgets, then the guild chevron checkbox, then the class
-  -- colour checkbox are created last.
+  -- group), then the "Guildmates" ones (in your guild, outside the group), then the "Hostiles"
+  -- ones (enemies tied to a quest), then Reset. The specs find widgets by creation order, so the
+  -- Friends widgets, then the guild chevron checkbox, then the class colour checkbox, then the
+  -- Hostiles group and finally the name font control are created last.
   local enabledBox = Checkbox(L("enabled"), -48, SetEnabled)
   local compactBox = Checkbox(L("compact"), -398, SetCompact)
 
@@ -1936,7 +2009,7 @@ local function BuildPanel()
 
   local reset = CreateFrame("Button", nil, content, "UIPanelButtonTemplate")
   reset:SetSize(160, 24)
-  reset:SetPoint("TOPLEFT", content, "TOPLEFT", 16, -796)
+  reset:SetPoint("TOPLEFT", content, "TOPLEFT", 16, -998)
   reset:SetText(L("reset"))
   reset:SetScript("OnClick", function()
     SafeCall("options reset", ResetAll)
@@ -1957,6 +2030,16 @@ local function BuildPanel()
   local classBox = Checkbox(L("class_colour"), -398, function(v) SetFlag("classcolor", v) end, 260)
   -- Friendlies: show level, beside "Class colour" (created last, see above).
   local levelBox = Checkbox(L("show_level"), -398, function(v) SetFlag("showlevel", v) end, 440)
+
+  -- Hostiles (enemies tied to one of your quests): name colour (name and chevron), then the
+  -- chevron size, text size and name height sliders. Created after the other sections and
+  -- before the font control, so the existing widgets keep their creation order.
+  Group(L("hostiles"), -790, 192)
+  Label(L("name_colour"), 16, -830)
+  local hostileFill = Swatch(-824, HostileColor, SetHostileColor, "hostilecolor")
+  sliders[#sliders + 1] = { "hostilechevsize", Slider(L("chevron_size"), -870, "hostilechevsize") }
+  sliders[#sliders + 1] = { "hostilesize", Slider(L("text_size"), -910, "hostilesize") }
+  sliders[#sliders + 1] = { "hostilenamegap", Slider(L("name_gap"), -950, "hostilenamegap") }
 
   -- Name font: a drop-down listing Core.FONTS, beside the name colour of the group members.
   -- Without the client's UIDropDownMenu API it falls back to a button that cycles through them.
@@ -2023,6 +2106,7 @@ local function BuildPanel()
       bnetBox:SetChecked(Flag("bnetfriends"))
       guildFill:SetColorTexture(GuildColor())
       guildChevronBox:SetChecked(Flag("guildchevron"))
+      hostileFill:SetColorTexture(HostileColor())
       classBox:SetChecked(Flag("classcolor"))
       levelBox:SetChecked(Flag("showlevel"))
       for _, sl in ipairs(sliders) do
@@ -2252,6 +2336,14 @@ for _, event in ipairs({ "PLAYER_GUILD_UPDATE", "GUILD_ROSTER_UPDATE" }) do
   handlers[event] = ScheduleFriendRefresh
 end
 
+-- Quest log changes (an objective progressing or completing, a quest accepted or removed) change
+-- which hostile units are tied to a quest: same coalesced refresh. QUEST_LOG_UPDATE and
+-- UNIT_QUEST_LOG_CHANGED can fire in bursts; a client without one of these events just fails its
+-- pcall RegisterEvent below.
+for _, event in ipairs({ "QUEST_LOG_UPDATE", "UNIT_QUEST_LOG_CHANGED", "QUEST_ACCEPTED", "QUEST_REMOVED" }) do
+  handlers[event] = ScheduleFriendRefresh
+end
+
 function handlers.NAME_PLATE_UNIT_REMOVED(unit)
   local plate = PlateForUnit(Readable(unit))
   local uf = type(plate) == "table" and UnitFrameOf(plate)
@@ -2313,6 +2405,23 @@ local function GuildText(unit, what)
     GUILD_SOURCE_NAMES[info.guildSource] or tostring(info.guildSource))
 end
 
+-- QUEST_SOURCE_NAMES are the sources of Core.QuestLookup, as /gchev prints them.
+local QUEST_SOURCE_NAMES = {
+  unit = "UnitIsRelatedToActiveQuest",
+  none = "none",
+  missing = "API missing",
+  skipped = "not asked: not known to be attackable",
+}
+
+-- QuestText says whether unit counts as a hostile unit tied to a quest, and which answer it comes
+-- from, e.g. "target quest hostile: yes (UnitIsRelatedToActiveQuest, attackable true)".
+local function QuestText(unit, what)
+  local info = Info(unit)
+  return string.format("%s quest hostile: %s (%s, attackable %s)", what,
+    Core.QuestHostile(info, ModeSettings()) and "yes" or "no",
+    QUEST_SOURCE_NAMES[info.questSource] or tostring(info.questSource), tostring(info.attackable))
+end
+
 -- ClassText gives unit's class token and class colour, and the colour its name gets, e.g.
 -- "class MAGE, class colour #3FC7EB (classcolor on), name colour: class #3FC7EB".
 local function ClassText(unit)
@@ -2346,10 +2455,12 @@ local function SlashStatus()
   elseif lastNameField then
     field = "UnitFrame." .. lastNameField
   end
-  local n, friends, guildmates, classes = 0, 0, 0, 0
+  local n, friends, guildmates, classes, quests = 0, 0, 0, 0, 0
   for _, m in pairs(marks) do
     if m.kind == "member" then
       n = n + 1
+    elseif m.kind == "quest" then
+      quests = quests + 1
     elseif m.kind == "guild" or m.kind == "guildcompact" then
       guildmates = guildmates + 1
     elseif m.kind == "class" or m.kind == "classcompact" then
@@ -2372,6 +2483,9 @@ local function SlashStatus()
   Print(string.format("friendlies: level %s; othersize %s, otherbarsize %s, othernamegap %d",
     Flag("showlevel") and "on" or "off", tostring(Factor("othersize")), tostring(Factor("otherbarsize")),
     Gap("othernamegap")))
+  Print(string.format("hostiles (quest): colour %s, hostilechevsize %s, hostilesize %s, hostilenamegap %d, "
+    .. "%d plate(s) marked; %s", Core.FormatColor(HostileColor()), tostring(Factor("hostilechevsize")),
+    tostring(Factor("hostilesize")), Gap("hostilenamegap"), quests, QuestText("target", "target")))
   Print(string.format("name font: %s", tostring(db.font)))
   local c = 0
   for _ in pairs(hidden) do
@@ -2384,6 +2498,7 @@ local function SlashStatus()
   Print("/gchev on | off | color #RRGGBB | chevsize 1-5 | textsize 1-3 | barsize 1-3 | buffsize 1-3"
     .. " | namegap -10-40 | friendcolor #RRGGBB | friendchevron on|off | bnetfriends on|off"
     .. " | guildcolor #RRGGBB | guildchevron on|off"
+    .. " | hostilecolor #RRGGBB | hostilechevsize 1-5 | hostilesize 1-3 | hostilenamegap -10-40"
     .. " | othersize 1-3 | otherbarsize 1-3 | othernamegap -10-40 | level on|off | compact on|off | classcolor on|off"
     .. " | font default|outline|chat|large|game13 | reset | options | debug")
 end
@@ -2513,6 +2628,7 @@ local function SlashDebug()
     field and ("UnitFrame." .. field) or "not found", IsMember(unit) and "yes" or "no"))
   Print("debug: " .. FriendText(unit, "target"))
   Print("debug: " .. GuildText(unit, "target"))
+  Print("debug: " .. QuestText(unit, "target"))
   Print("debug: " .. ClassText(unit))
   -- Blizzard's name on this plate, and whether ours covers it (enemies without a name: Blizzard's
   -- alpha 0 and "covered: no" would be a fade we failed to give back).
@@ -2647,6 +2763,19 @@ local function Slash(msg)
       return
     end
     Print("guildcolor " .. Core.FormatColor(r, g, b))
+  elseif cmd == "hostilecolor" or cmd == "hostilecolour" then
+    if arg == "" then
+      Print(string.format("hostilecolor %s (default %s)", Core.FormatColor(HostileColor()),
+        Core.FormatColor(unpack(Core.DEFAULT_HOSTILE_COLOR))))
+      return
+    end
+    local r, g, b = Core.ParseColor(arg)
+    if not r or not SetHostileColor(r, g, b) then
+      Print(string.format("invalid hostilecolor %q: use #RRGGBB, e.g. /gchev hostilecolor #FFFF00; nothing changed",
+        arg))
+      return
+    end
+    Print("hostilecolor " .. Core.FormatColor(r, g, b))
   elseif FLAG_DEFAULTS[cmd] ~= nil then
     if arg == "" then
       Print(string.format("%s %s (on or off, default %s)", cmd, Flag(cmd) and "on" or "off",

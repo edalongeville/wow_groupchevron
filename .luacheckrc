@@ -66,6 +66,7 @@ read_globals = {
   "UIDropDownMenu_SetText",
   "UIDropDownMenu_SetWidth",
   "SetAbandonQuest",
+  "UnitCanAttack",
   "UnitClass",
   "UnitFactionGroup",
   "UnitFullName",
