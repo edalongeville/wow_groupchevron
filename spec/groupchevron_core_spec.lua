@@ -197,7 +197,7 @@ describe("GroupChevron Core", function()
     end)
 
     it("gives English for an unknown or missing locale, enGB included", function()
-      assert.are.equal("Enabled", Core.Translate("deDE", "enabled"))
+      assert.are.equal("Enabled", Core.Translate("xxXX", "enabled"))
       assert.are.equal("Enabled", Core.Translate(nil, "enabled"))
       assert.are.equal("Enabled", Core.Translate(42, "enabled"))
       assert.are.equal("Enabled", Core.Translate("enGB", "enabled"))
@@ -208,13 +208,38 @@ describe("GroupChevron Core", function()
       assert.are.equal("nil", Core.Translate("frFR", nil))
     end)
 
-    it("defines every English key in frFR, and no extra one", function()
-      for key in pairs(Core.Locales.enUS) do
-        assert.is_string(Core.Locales.frFR[key], key)
+    it("defines every English key in every client locale, and no extra one", function()
+      for _, locale in ipairs(Core.CLIENT_LOCALES) do
+        local set = Core.Locales[locale]
+        assert.is_table(set, locale)
+        for key in pairs(Core.Locales.enUS) do
+          assert.is_string(set[key], locale .. " " .. key)
+          assert.is_true(#set[key] > 0, locale .. " " .. key)
+        end
+        for key in pairs(set) do
+          assert.is_string(Core.Locales.enUS[key], locale .. " " .. key)
+        end
       end
-      for key in pairs(Core.Locales.frFR) do
-        assert.is_string(Core.Locales.enUS[key], key)
+    end)
+
+    it("covers every locale of the game client", function()
+      local expected = { "enUS", "enGB", "frFR", "deDE", "esES", "esMX", "itIT", "ptBR", "ruRU", "koKR",
+        "zhCN", "zhTW" }
+      assert.are.same(expected, Core.CLIENT_LOCALES)
+    end)
+
+    it("translates every key in each non-English locale", function()
+      for _, locale in ipairs({ "frFR", "deDE", "esES", "itIT", "ptBR", "ruRU", "koKR", "zhCN", "zhTW" }) do
+        for key, english in pairs(Core.Locales.enUS) do
+          assert.are_not.equal(english, Core.Translate(locale, key), locale .. " " .. key)
+        end
       end
+    end)
+
+    it("shares the English texts with enGB and the Spanish ones with esMX", function()
+      assert.are.equal(Core.Locales.enUS, Core.Locales.enGB)
+      assert.are.equal(Core.Locales.esES, Core.Locales.esMX)
+      assert.are.equal("Activado", Core.Translate("esMX", "enabled"))
     end)
   end)
 
@@ -364,10 +389,11 @@ describe("GroupChevron Core", function()
       assert.are.equal(5, Core.DefaultGap("hostilenamegap"))
     end)
 
-    it("has an English and a French title for the options group", function()
+    it("has a title for the options group in every locale", function()
       assert.are.equal("Quest hostiles (enemies tied to your quests)", Core.Translate("enUS", "hostiles"))
       assert.are.equal("Ennemis de quête (liés à vos quêtes)", Core.Translate("frFR", "hostiles"))
-      assert.are.equal("Quest hostiles (enemies tied to your quests)", Core.Translate("deDE", "hostiles"))
+      assert.are.equal("Quest-Gegner (mit aktiven Quests verknüpft)", Core.Translate("deDE", "hostiles"))
+      assert.are.equal("Quest hostiles (enemies tied to your quests)", Core.Translate("xxXX", "hostiles"))
     end)
 
     -- questAPI: the injected functions for the hostile checks; quests[unit] is the quest answer.
