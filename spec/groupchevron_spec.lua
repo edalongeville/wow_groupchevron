@@ -3283,10 +3283,21 @@ describe("GroupChevron", function()
       assert.is_false(has(texts, "Reset to defaults"))
     end)
 
-    it("keeps the English panel on enUS, another locale or a failing GetLocale", function()
+    it("shows the panel in German on a deDE client", function()
+      local overrides, rec = widgetClient()
+      overrides.GetLocale = function() return "deDE" end
+      load({ overrides = overrides })
+      local texts = panelTexts(rec)
+      for _, s in ipairs({ "GroupChevron", "Aktiviert", "Gruppenmitglieder", "Namensfarbe", "Zurücksetzen" }) do
+        assert.is_true(has(texts, s), s)
+      end
+      assert.is_false(has(texts, "Enabled"))
+    end)
+
+    it("keeps the English panel on enUS, an unknown locale or a failing GetLocale", function()
       for _, getLocale in ipairs({
         function() return "enUS" end,
-        function() return "deDE" end,
+        function() return "xxXX" end,
         function() error("boom") end,
       }) do
         local overrides, rec = widgetClient()
