@@ -5,9 +5,9 @@ name: Release
 # The tag must match `## Version` in GroupChevron/GroupChevron.toc.
 #
 # Secrets (Settings -> Secrets and variables -> Actions):
-#   CF_API_TOKEN CurseForge API token (https://wow.curseforge.com/account/api-tokens)
-# And in GroupChevron/GroupChevron.toc, once the CurseForge project exists:
-#   ## X-Curse-Project-ID: <numeric project id>
+#   CF_API_TOKEN CurseForge API token (https://www.curseforge.com/account/api-tokens)
+# And in GroupChevron/GroupChevron.toc:
+#   ## X-Curse-Project-ID: 1808085
 
 on:
   push:
