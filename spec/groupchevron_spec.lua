@@ -3709,12 +3709,12 @@ describe("GroupChevron", function()
         hostile[#hostile + 1] = owned[i]
       end
       assert.is_true(hostile[1].shown)
-      -- Default thickness 2: 0.1875 * 2 * 2.4 points to the right for the first copy.
-      assert.is_true(math.abs(hostile[1].points[1][4] - 0.9) < 1e-9)
+      -- Default thickness 2: 0.1875 * 2 * 3.2 points to the right for the first copy.
+      assert.is_true(math.abs(hostile[1].points[1][4] - 1.2) < 1e-9)
       local slider = widget(rec, "Slider", 15)
       slider.scripts.OnMouseDown(slider)
       slider.scripts.OnValueChanged(slider, 3)
-      assert.is_true(math.abs(hostile[1].points[1][4] - 1.35) < 1e-9)
+      assert.is_true(math.abs(hostile[1].points[1][4] - 1.8) < 1e-9)
       assert.are.equal(2, env.GroupChevronDB.hostileoutlinesize) -- not saved before the release
       slider.scripts.OnValueChanged(slider, 0)
       assert.is_false(hostile[1].shown)

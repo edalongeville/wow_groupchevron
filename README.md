@@ -42,6 +42,7 @@ Regenerate the textures from the repository root:
 python3 tools/chevron_tga.py GroupChevron/chevron.tga
 python3 tools/groupchevron_icon_tga.py GroupChevron/icon.tga
 python3 tools/curseforge_icon_png.py assets/curseforge-icon.png
+python3 tools/preview_backdrop_tga.py GroupChevron/backdrop.tga
 ```
 
 Bump `## Version` in `GroupChevron/GroupChevron.toc` with every change to the addon (patch for fixes, minor for features).
