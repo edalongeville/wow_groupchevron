@@ -338,7 +338,7 @@ end
 local function vcount(frame)
   local n = 0
   for _, t in ipairs(frame.textures) do
-    if t.texture == "Interface\\AddOns\\GroupChevron\\chevron.tga" then
+    if t.texture == "Interface\\AddOns\\GroupChevron\\chevron.tga" and not t.owner then
       n = n + 1
     end
   end
@@ -2948,7 +2948,7 @@ describe("GroupChevron", function()
       assert.are.equal(-3, label.points[1][5])
     end)
 
-    it("draws a black outline under the chevron, per kind, off with /gchev hostileoutline off", function()
+    it("draws a black outline under the chevron, per kind, with its own thickness", function()
       local env = load()
       local plate = newPlate("nameplate1", "Orc", BLUE)
       env.world.plates.nameplate1 = plate
@@ -2957,17 +2957,21 @@ describe("GroupChevron", function()
       local function outlines(ch)
         local out = {}
         for _, t in ipairs(ch.textures) do
-          if t.texture == "Interface\\AddOns\\GroupChevron\\chevron_outline.tga" then
+          if t.owner then
             out[#out + 1] = t
           end
         end
         return out
       end
       local ch = env.chevron(plate)
-      assert.are.equal(1, #outlines(ch))
+      assert.are.equal(8, #outlines(ch))
       assert.are.equal("#000000", hex(outlines(ch)[1].vertex))
       assert.is_true(outlines(ch)[1].shown)
-      assert.are.equal(12.5, outlines(ch)[1].w)
+      -- Default thickness 2: 0.1875 * 2 * the chevron size (1 in these specs), to the right for the first copy.
+      assert.are.equal(0.375, outlines(ch)[1].points[1][4])
+      env.slash("hostileoutlinesize 4")
+      assert.are.equal(4, env.GroupChevronDB.hostileoutlinesize)
+      assert.are.equal(0.75, outlines(env.chevron(plate))[1].points[1][4])
       env.slash("hostileoutline off")
       assert.is_false(env.GroupChevronDB.hostileoutline)
       assert.is_false(outlines(env.chevron(plate))[1].shown)
@@ -3482,8 +3486,8 @@ describe("GroupChevron", function()
       gap.scripts.OnMouseUp(gap)
       assert.are.equal(12, env.GroupChevronDB.namegap)
       -- Then the hostiles' chevron size (1..5), text size (1..3) and name gap (-10..40).
-      local hostileChev, hostileText = widget(rec, "Slider", 9), widget(rec, "Slider", 10)
-      local hostileGap = widget(rec, "Slider", 11)
+      local hostileChev, hostileText = widget(rec, "Slider", 12), widget(rec, "Slider", 13)
+      local hostileGap = widget(rec, "Slider", 14)
       hostileChev.scripts.OnValueChanged(hostileChev, 4.5)
       assert.are.equal(4.5, env.GroupChevronDB.hostilechevsize)
       hostileChev.scripts.OnValueChanged(hostileChev, 5.5)
@@ -3496,7 +3500,7 @@ describe("GroupChevron", function()
       assert.are.equal(7, env.GroupChevronDB.hostilenamegap)
       hostileGap.scripts.OnValueChanged(hostileGap, 41)
       assert.are.equal(7, env.GroupChevronDB.hostilenamegap)
-      assert.is_nil(widget(rec, "Slider", 12))
+      assert.is_nil(widget(rec, "Slider", 16))
       assert.are.equal(2.25, env.GroupChevronDB.textsize)
 
       -- The panel shows the saved gaps when it opens.
@@ -3588,9 +3592,9 @@ describe("GroupChevron", function()
       env.slash("hostilesize 2")
       env.slash("hostilenamegap 9")
       rec.frame.scripts.OnShow(rec.frame)
-      assert.are.equal(4, widget(rec, "Slider", 9).value)
-      assert.are.equal(2, widget(rec, "Slider", 10).value)
-      assert.are.equal(9, widget(rec, "Slider", 11).value)
+      assert.are.equal(4, widget(rec, "Slider", 12).value)
+      assert.are.equal(2, widget(rec, "Slider", 13).value)
+      assert.are.equal(9, widget(rec, "Slider", 14).value)
     end)
 
     it("has a Friends section with a colour swatch and two checkboxes", function()

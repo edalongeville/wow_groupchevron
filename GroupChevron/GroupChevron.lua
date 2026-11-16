@@ -45,11 +45,16 @@ local PREFIX = "|cffff4fd8GChev|r: "
 -- looked pixelated when enlarged. Those rectangles (ARM_*) remain the fallback when the
 -- texture cannot be loaded.
 local CHEVRON_TEXTURE = "Interface\\AddOns\\GroupChevron\\chevron.tga"
--- The black outline: chevron_outline.tga is the same "V", thicker, on an 80x40 canvas (chevron.tga
--- is 64x32), so it is drawn OUTLINE_SCALE times the size of its "V", centred on it, below it, and
--- tinted black. The fallback rectangles (texture not found) have no outline.
-local OUTLINE_TEXTURE = "Interface\\AddOns\\GroupChevron\\chevron_outline.tga"
-local OUTLINE_SCALE = 1.25
+-- The black outline: OUTLINE_DIRS black copies of each "V" (same texture), each moved by the thickness in
+-- one of eight directions (the diagonals scaled to the same distance), drawn below the "V". The
+-- thickness is OUTLINE_UNIT * the section's factor (memberoutlinesize, friendoutlinesize,
+-- guildoutlinesize, hostileoutlinesize: 1 to 5, default 2) * the chevron size, so the outline
+-- grows with the chevron. The fallback rectangles (texture not found) have no outline.
+local OUTLINE_UNIT = 0.1875
+local OUTLINE_DIRS = {
+  { 1, 0 }, { -1, 0 }, { 0, 1 }, { 0, -1 },
+  { 0.7071, 0.7071 }, { -0.7071, 0.7071 }, { 0.7071, -0.7071 }, { -0.7071, -0.7071 },
+}
 local V_WIDTH = 10
 local V_HEIGHT = 5
 local STEP = 4
@@ -408,22 +413,23 @@ end
 
 -- LayoutChevron (re)sizes the whole chevron for the saved chevsize; a no-op when unchanged.
 -- The GAP above the name is not scaled (it is the frame's anchor offset).
-local function LayoutChevron(frame)
+local function LayoutChevron(frame, thickness)
   local f = Factor(frame.single and "hostilechevsize" or "chevsize")
-  if frame.factor == f then
+  if frame.factor == f and frame.thickness == thickness then
     return
   end
-  frame.factor = f
+  frame.factor, frame.thickness = f, thickness
   frame:SetSize(CHEVRON_WIDTH * f, (frame.single and SINGLE_HEIGHT or CHEVRON_HEIGHT) * f)
   for _, tex in ipairs(frame.vs) do
     tex:SetSize(V_WIDTH * f, V_HEIGHT * f)
     tex:ClearAllPoints()
     tex:SetPoint("BOTTOM", frame, "BOTTOM", 0, tex.baseY * f)
   end
+  local offset = OUTLINE_UNIT * (thickness or Core.DEFAULT_FACTOR) * f
   for _, outline in ipairs(frame.outlines) do
-    outline:SetSize(V_WIDTH * f * OUTLINE_SCALE, V_HEIGHT * f * OUTLINE_SCALE)
+    outline:SetSize(V_WIDTH * f, V_HEIGHT * f)
     outline:ClearAllPoints()
-    outline:SetPoint("CENTER", outline.owner, "CENTER", 0, 0)
+    outline:SetPoint("CENTER", outline.owner, "CENTER", outline.dx * offset, outline.dy * offset)
   end
   for _, tex in ipairs(frame.arms) do
     LayoutArm(frame, tex, f)
@@ -448,23 +454,20 @@ local function AddV(frame, baseY, alpha)
   return true
 end
 
--- AddOutlines adds, below each "V" of the frame, its black outline (same alpha). One that the client
--- cannot load is left out (chat says so once): the "V"s are then drawn without an outline.
+-- AddOutlines adds, below each "V" of the frame, its black copies (same alpha), hidden until
+-- SetOutline. If the texture cannot be loaded there is no outline (the "V"s have already said so).
 local function AddOutlines(frame)
   for _, tex in ipairs(frame.vs) do
-    local outline = frame:CreateTexture(nil, "ARTWORK")
-    local ok, loaded = pcall(outline.SetTexture, outline, OUTLINE_TEXTURE)
-    if ok and loaded ~= false then
+    for _, dir in ipairs(OUTLINE_DIRS) do
+      local outline = frame:CreateTexture(nil, "ARTWORK")
+      outline:SetTexture(CHEVRON_TEXTURE)
       Method(outline, "SetSnapToPixelGrid", false)
       Method(outline, "SetTexelSnappingBias", 0)
-      outline.owner = tex
+      outline.owner, outline.dx, outline.dy = tex, dir[1], dir[2]
       outline:SetVertexColor(0, 0, 0, 1)
       outline:SetAlpha(tex.baseAlpha)
       outline:Hide()
       frame.outlines[#frame.outlines + 1] = outline
-    else
-      Method(outline, "Hide")
-      NoticeOnce("nooutline", "chevron outline texture not found (restart the game after an update): no outline")
     end
   end
 end
@@ -951,7 +954,7 @@ local function MemberStyle()
   local r, g, b = Color()
   return {
     kind = "member", r = r, g = g, b = b, chevron = true, size = Factor("textsize"), scales = true,
-    gap = Gap("namegap"), outline = Flag("memberoutline"),
+    gap = Gap("namegap"), outline = Flag("memberoutline"), outlinesize = Factor("memberoutlinesize"),
   }
 end
 
@@ -961,7 +964,7 @@ local function FriendStyle(compact, level)
     kind = compact and "friendcompact" or "friend",
     r = r, g = g, b = b,
     chevron = Flag("friendchevron"),
-    outline = Flag("friendoutline"),
+    outline = Flag("friendoutline"), outlinesize = Factor("friendoutlinesize"),
     size = OtherFactor("othersize"),
     bar = not compact and OtherFactor("otherbarsize") or nil,
     scales = false,
@@ -977,7 +980,7 @@ local function GuildStyle(compact, level)
     kind = compact and "guildcompact" or "guild",
     r = r, g = g, b = b,
     chevron = Flag("guildchevron"),
-    outline = Flag("guildoutline"),
+    outline = Flag("guildoutline"), outlinesize = Factor("guildoutlinesize"),
     size = OtherFactor("othersize"),
     bar = not compact and OtherFactor("otherbarsize") or nil,
     scales = false,
@@ -1009,6 +1012,7 @@ local function HostileStyle()
   return {
     kind = "quest", r = r, g = g, b = b, chevron = true, single = true, size = Factor("hostilesize"),
     scales = false, gap = Gap("hostilenamegap"), outline = Flag("hostileoutline"),
+    outlinesize = Factor("hostileoutlinesize"),
   }
 end
 
@@ -1064,7 +1068,7 @@ local function Mark(plate, uf, style)
     else
       chevron:SetPoint("BOTTOM", uf, "TOP", 0, GAP)
     end
-    LayoutChevron(chevron)
+    LayoutChevron(chevron, style.outlinesize)
     ColorChevron(chevron, r, g, b)
     SetOutline(chevron, style.outline == true)
     chevron:Show()
@@ -1738,7 +1742,8 @@ end
 -- FACTOR_KINDS are the size settings SetFactor accepts.
 local FACTOR_KINDS = {
   chevsize = true, textsize = true, othersize = true, barsize = true, buffsize = true, otherbarsize = true,
-  hostilechevsize = true, hostilesize = true,
+  hostilechevsize = true, hostilesize = true, memberoutlinesize = true, friendoutlinesize = true,
+  guildoutlinesize = true, hostileoutlinesize = true,
 }
 
 -- SetFactor sets one of FACTOR_KINDS from a number (the panel's slider) or a
@@ -1821,7 +1826,8 @@ local function ResetAll()
   db.classcolor = Core.DEFAULT_CLASSCOLOR
   db.showlevel = true
   for _, key in ipairs({ "chevsize", "textsize", "othersize", "barsize", "buffsize", "otherbarsize",
-    "hostilechevsize", "hostilesize" }) do
+    "hostilechevsize", "hostilesize", "memberoutlinesize", "friendoutlinesize", "guildoutlinesize",
+    "hostileoutlinesize" }) do
     db[key] = Core.DefaultFactor(key)
   end
   for _, key in ipairs({ "namegap", "othernamegap", "hostilenamegap" }) do
@@ -1867,7 +1873,7 @@ local function BuildPanel()
   scroll:SetPoint("TOPLEFT", panel, "TOPLEFT", 0, -4)
   scroll:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -28, 4)
   local content = CreateFrame("Frame", nil, scroll)
-  content:SetSize(600, 1040)
+  content:SetSize(600, 1200)
   scroll:SetScrollChild(content)
 
   local function Label(text, x, y, template)
@@ -1976,10 +1982,10 @@ local function BuildPanel()
     return Label(title, 16, y - 8, "GameFontNormal")
   end
 
-  Group(L("group_members"), -84, 272)
-  Group(L("friendlies"), -366, 190)
-  Group(L("friends"), -566, 102)
-  Group(L("guildmates"), -678, 102)
+  Group(L("group_members"), -84, 312)
+  Group(L("friendlies"), -406, 190)
+  Group(L("friends"), -606, 142)
+  Group(L("guildmates"), -758, 142)
 
   -- Layout: Enabled, then the "Group members" settings, then the "Friendlies" ones
   -- (friendly players outside the group), then the "Friends" ones (friends list, outside the
@@ -1988,7 +1994,7 @@ local function BuildPanel()
   -- Friends widgets, then the guild chevron checkbox, then the class colour checkbox, then the
   -- Hostiles group and finally the name font control are created last.
   local enabledBox = Checkbox(L("enabled"), -48, SetEnabled)
-  local compactBox = Checkbox(L("compact"), -398, SetCompact)
+  local compactBox = Checkbox(L("compact"), -438, SetCompact)
 
   -- Name colour: a swatch that opens the colour picker (live apply, Cancel restores).
   Label(L("name_colour"), 16, -124)
@@ -2050,45 +2056,48 @@ local function BuildPanel()
   local sliders = {
     { "chevsize", Slider(L("chevron_size"), -164, "chevsize") },
     { "textsize", Slider(L("text_size"), -204, "textsize") },
-    { "othersize", Slider(L("text_size"), -440, "othersize") },
+    { "othersize", Slider(L("text_size"), -480, "othersize") },
     { "barsize", Slider(L("bar_size"), -244, "barsize") },
     { "buffsize", Slider(L("buffs_size"), -284, "buffsize") },
-    { "otherbarsize", Slider(L("bar_size"), -480, "otherbarsize") },
+    { "otherbarsize", Slider(L("bar_size"), -520, "otherbarsize") },
     { "namegap", Slider(L("name_gap"), -324, "namegap") },
-    { "othernamegap", Slider(L("name_gap"), -520, "othernamegap") },
+    { "othernamegap", Slider(L("name_gap"), -560, "othernamegap") },
+    { "memberoutlinesize", Slider(L("outline_size"), -364, "memberoutlinesize") },
+    { "friendoutlinesize", Slider(L("outline_size"), -708, "friendoutlinesize") },
+    { "guildoutlinesize", Slider(L("outline_size"), -860, "guildoutlinesize") },
   }
 
   local reset = CreateFrame("Button", nil, content, "UIPanelButtonTemplate")
   reset:SetSize(160, 24)
-  reset:SetPoint("TOPLEFT", content, "TOPLEFT", 16, -998)
+  reset:SetPoint("TOPLEFT", content, "TOPLEFT", 16, -1158)
   reset:SetText(L("reset"))
   reset:SetScript("OnClick", function()
     SafeCall("options reset", ResetAll)
   end)
 
   -- Friends (on your friends list, outside your group).
-  Label(L("name_colour"), 16, -606)
-  local friendFill = Swatch(-600, FriendColor, SetFriendColor, "friendcolor")
-  local friendChevronBox = Checkbox(L("show_chevron"), -628, function(v) SetFlag("friendchevron", v) end)
-  local bnetBox = Checkbox(L("bnet_friends"), -628, function(v) SetFlag("bnetfriends", v) end, 200)
+  Label(L("name_colour"), 16, -646)
+  local friendFill = Swatch(-640, FriendColor, SetFriendColor, "friendcolor")
+  local friendChevronBox = Checkbox(L("show_chevron"), -668, function(v) SetFlag("friendchevron", v) end)
+  local bnetBox = Checkbox(L("bnet_friends"), -668, function(v) SetFlag("bnetfriends", v) end, 200)
 
   -- Guildmates (in your guild, outside your group, not on your friends list).
-  Label(L("name_colour"), 16, -718)
-  local guildFill = Swatch(-712, GuildColor, SetGuildColor, "guildcolor")
-  local guildChevronBox = Checkbox(L("show_chevron"), -740, function(v) SetFlag("guildchevron", v) end)
+  Label(L("name_colour"), 16, -798)
+  local guildFill = Swatch(-792, GuildColor, SetGuildColor, "guildcolor")
+  local guildChevronBox = Checkbox(L("show_chevron"), -820, function(v) SetFlag("guildchevron", v) end)
 
   -- Friendlies: the class colour, beside "Compact plates".
-  local classBox = Checkbox(L("class_colour"), -398, function(v) SetFlag("classcolor", v) end, 260)
+  local classBox = Checkbox(L("class_colour"), -438, function(v) SetFlag("classcolor", v) end, 260)
   -- Friendlies: show level, beside "Class colour" (created last, see above).
-  local levelBox = Checkbox(L("show_level"), -398, function(v) SetFlag("showlevel", v) end, 440)
+  local levelBox = Checkbox(L("show_level"), -438, function(v) SetFlag("showlevel", v) end, 440)
 
   -- Chevron outline checkboxes (members, friends, guildmates; the hostiles' is in their group), and
   -- live chevron previews beside the colour swatches: the same texture, tinted with the chosen colour,
   -- with or without its outline. Textures of the content frame (no frames of their own), updated by
   -- RefreshPanel, so a colour picked or an option changed shows at once.
-  local memberOutlineBox = Checkbox(L("outline"), -158, function(v) SetFlag("memberoutline", v) end, 470)
-  local friendOutlineBox = Checkbox(L("outline"), -628, function(v) SetFlag("friendoutline", v) end, 450)
-  local guildOutlineBox = Checkbox(L("outline"), -740, function(v) SetFlag("guildoutline", v) end, 200)
+  local memberOutlineBox = Checkbox(L("outline"), -364, function(v) SetFlag("memberoutline", v) end, 470)
+  local friendOutlineBox = Checkbox(L("outline"), -708, function(v) SetFlag("friendoutline", v) end, 470)
+  local guildOutlineBox = Checkbox(L("outline"), -860, function(v) SetFlag("guildoutline", v) end, 470)
 
   local PREVIEW_SCALE = 2.4 -- panel points per chevron unit (the plates' chevron at size 1)
   -- Preview draws a chevron (single: one "V", else the double chevron) beside the swatch at
@@ -2107,18 +2116,17 @@ local function BuildPanel()
       v:SetSize(V_WIDTH * PREVIEW_SCALE, V_HEIGHT * PREVIEW_SCALE)
       v:SetPoint("TOPLEFT", content, "TOPLEFT", 192, top - offset)
       v:SetAlpha(alpha)
-      local outline = content:CreateTexture(nil, "ARTWORK")
-      local okOutline, loadedOutline = pcall(outline.SetTexture, outline, OUTLINE_TEXTURE)
-      if okOutline and loadedOutline ~= false then
-        outline:SetSize(V_WIDTH * PREVIEW_SCALE * OUTLINE_SCALE, V_HEIGHT * PREVIEW_SCALE * OUTLINE_SCALE)
-        outline:SetPoint("CENTER", v, "CENTER", 0, 0)
+      local outlines = {}
+      for _, dir in ipairs(OUTLINE_DIRS) do
+        local outline = content:CreateTexture(nil, "ARTWORK")
+        outline:SetTexture(CHEVRON_TEXTURE)
+        outline:SetSize(V_WIDTH * PREVIEW_SCALE, V_HEIGHT * PREVIEW_SCALE)
         outline:SetVertexColor(0, 0, 0, 1)
         outline:SetAlpha(alpha)
-      else
-        Method(outline, "Hide")
-        outline = nil
+        outline.dx, outline.dy, outline.owner = dir[1], dir[2], v
+        outlines[#outlines + 1] = outline
       end
-      items[#items + 1] = { v = v, outline = outline }
+      items[#items + 1] = { v = v, outlines = outlines }
     end
     Add(0, 1)
     if not single then
@@ -2128,11 +2136,14 @@ local function BuildPanel()
       local r, g, b = get()
       for _, item in ipairs(items) do
         item.v:SetVertexColor(r, g, b, 1)
-        if item.outline then
+        local offset = OUTLINE_UNIT * Factor(outlineKey .. "size") * PREVIEW_SCALE
+        for _, outline in ipairs(item.outlines) do
+          outline:ClearAllPoints()
+          outline:SetPoint("CENTER", outline.owner, "CENTER", outline.dx * offset, outline.dy * offset)
           if Flag(outlineKey) then
-            item.outline:Show()
+            outline:Show()
           else
-            item.outline:Hide()
+            outline:Hide()
           end
         end
       end
@@ -2140,21 +2151,22 @@ local function BuildPanel()
   end
   local previews = {
     Preview(-118, false, Color, "memberoutline"),
-    Preview(-600, false, FriendColor, "friendoutline"),
-    Preview(-712, false, GuildColor, "guildoutline"),
+    Preview(-640, false, FriendColor, "friendoutline"),
+    Preview(-792, false, GuildColor, "guildoutline"),
   }
 
   -- Hostiles (enemies tied to one of your quests): name colour (name and chevron), then the
   -- chevron size, text size and name height sliders. Created after the other sections and
   -- before the font control, so the existing widgets keep their creation order.
-  Group(L("hostiles"), -790, 192)
-  Label(L("name_colour"), 16, -830)
-  local hostileFill = Swatch(-824, HostileColor, SetHostileColor, "hostilecolor")
-  sliders[#sliders + 1] = { "hostilechevsize", Slider(L("chevron_size"), -870, "hostilechevsize") }
-  sliders[#sliders + 1] = { "hostilesize", Slider(L("text_size"), -910, "hostilesize") }
-  sliders[#sliders + 1] = { "hostilenamegap", Slider(L("name_gap"), -950, "hostilenamegap") }
-  local hostileOutlineBox = Checkbox(L("outline"), -864, function(v) SetFlag("hostileoutline", v) end, 470)
-  previews[#previews + 1] = Preview(-824, true, HostileColor, "hostileoutline")
+  Group(L("hostiles"), -910, 232)
+  Label(L("name_colour"), 16, -950)
+  local hostileFill = Swatch(-944, HostileColor, SetHostileColor, "hostilecolor")
+  sliders[#sliders + 1] = { "hostilechevsize", Slider(L("chevron_size"), -990, "hostilechevsize") }
+  sliders[#sliders + 1] = { "hostilesize", Slider(L("text_size"), -1030, "hostilesize") }
+  sliders[#sliders + 1] = { "hostilenamegap", Slider(L("name_gap"), -1070, "hostilenamegap") }
+  sliders[#sliders + 1] = { "hostileoutlinesize", Slider(L("outline_size"), -1110, "hostileoutlinesize") }
+  local hostileOutlineBox = Checkbox(L("outline"), -1110, function(v) SetFlag("hostileoutline", v) end, 470)
+  previews[#previews + 1] = Preview(-944, true, HostileColor, "hostileoutline")
 
   -- Name font: a drop-down listing Core.FONTS, beside the name colour of the group members.
   -- Without the client's UIDropDownMenu API it falls back to a button that cycles through them.
@@ -2622,6 +2634,7 @@ local function SlashStatus()
     .. " | guildcolor #RRGGBB | guildchevron on|off"
     .. " | hostilecolor #RRGGBB | hostilechevsize 1-5 | hostilesize 1-3 | hostilenamegap -10-40"
     .. " | memberoutline on|off | friendoutline on|off | guildoutline on|off | hostileoutline on|off"
+    .. " | memberoutlinesize|friendoutlinesize|guildoutlinesize|hostileoutlinesize 1-5"
     .. " | othersize 1-3 | otherbarsize 1-3 | othernamegap -10-40 | level on|off | compact on|off | classcolor on|off"
     .. " | font default|outline|chat|large|game13 | reset | options | debug")
 end
