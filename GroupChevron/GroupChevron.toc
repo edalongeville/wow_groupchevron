@@ -2,7 +2,7 @@
 ## Title: GroupChevron
 ## Notes: Chevron and coloured name on nameplates: pink for your group, blue for friends, green for guildmates, yellow for enemies tied to your quests. Needs friendly player nameplates (V). /gchev
 ## Notes-frFR: Chevron et nom coloré sur les plaques de nom : rose pour votre groupe, bleu pour les amis, vert pour les membres de guilde, jaune pour les ennemis liés à vos quêtes. Nécessite les plaques de nom des joueurs amicaux (V). /gchev
-## Version: 0.21.0
+## Version: 0.23.0
 ## Author: Garzak
 ## X-License: MIT
 ## X-Curse-Project-ID: 1808085

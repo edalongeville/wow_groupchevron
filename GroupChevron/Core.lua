@@ -97,10 +97,10 @@ Core.MAX_FACTORS = { chevsize = 5, hostilechevsize = 5, friendchevsize = 5, guil
   memberoutlinesize = 5, friendoutlinesize = 5, guildoutlinesize = 5, hostileoutlinesize = 5 }
 Core.DEFAULT_FACTOR = 1
 -- DEFAULT_FACTORS are the defaults of the kinds that do not start at DEFAULT_FACTOR (1, which
--- also stays the "no scaling" value the plates compare against). The hostiles start where the
--- friendlies do: the chevron at the size the friends' chevron has (chevsize), the text at 1.
-Core.DEFAULT_FACTORS = { chevsize = 3, textsize = 1.75, buffsize = 1.1, hostilechevsize = 3, friendchevsize = 3,
-  guildchevsize = 3, memberoutlinesize = 2,
+-- also stays the "no scaling" value the plates compare against). The hostiles' chevron starts at
+-- the size the friends' chevron has (chevsize) and their text at 1.
+Core.DEFAULT_FACTORS = { chevsize = 3, textsize = 2, othersize = 1.6, buffsize = 1.1, hostilechevsize = 3,
+  friendchevsize = 3, guildchevsize = 3, memberoutlinesize = 2,
   friendoutlinesize = 2, guildoutlinesize = 2, hostileoutlinesize = 2 }
 
 -- DefaultFactor is the default of a factor kind: its DEFAULT_FACTORS entry, else DEFAULT_FACTOR.

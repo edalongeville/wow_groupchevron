@@ -154,7 +154,8 @@ end
 -- load runs Core.lua and GroupChevron.lua in a fresh fake client.
 -- NEUTRAL_SETTINGS are the settings the specs run with unless they say otherwise (see load).
 local NEUTRAL_SETTINGS = {
-  chevsize = 1, textsize = 1, buffsize = 1, namegap = 0, othernamegap = 0, font = "default", classcolor = false,
+  chevsize = 1, textsize = 1, othersize = 1, buffsize = 1, namegap = 0, othernamegap = 0, font = "default",
+  classcolor = false,
   hostilechevsize = 1, friendchevsize = 1, guildchevsize = 1, hostilesize = 1, hostilenamegap = 0,
 }
 
@@ -373,14 +374,14 @@ describe("GroupChevron", function()
     assert.are.equal("#FF4FD8", hex(db.color))
     assert.are.equal("outline", db.font)
     assert.are.equal(3, db.chevsize)
-    assert.are.equal(1.75, db.textsize)
+    assert.are.equal(2, db.textsize)
     assert.are.equal(1, db.barsize)
     assert.are.equal(1.1, db.buffsize)
     assert.are.equal(5, db.namegap)
     assert.is_true(db.compact)
     assert.is_true(db.classcolor)
     assert.is_true(db.showlevel)
-    assert.are.equal(1, db.othersize)
+    assert.are.equal(1.6, db.othersize)
     assert.are.equal(1, db.otherbarsize)
     assert.are.equal(5, db.othernamegap)
     assert.are.equal("#3FA7FF", hex(db.friendcolor))
@@ -388,8 +389,8 @@ describe("GroupChevron", function()
     assert.is_true(db.bnetfriends)
     assert.are.equal("#40FF40", hex(db.guildcolor))
     assert.is_true(db.guildchevron)
-    -- The hostiles start like the friendlies: chevron at the friends' chevron size, text size 1,
-    -- name height 5; the colour is yellow.
+    -- The hostiles: chevron at the friends' chevron size, text size 1, name height 5; the colour
+    -- is yellow.
     assert.are.equal("#FFFF00", hex(db.hostilecolor))
     assert.are.equal(3, db.hostilechevsize)
     assert.are.equal(1, db.hostilesize)
@@ -1205,7 +1206,7 @@ describe("GroupChevron", function()
       assert.are.equal(1, holder.scale)
 
       env.slash("othersize")
-      assert.is_true(printedContains(env, "othersize 1 (1 to 3, default 1)"))
+      assert.is_true(printedContains(env, "othersize 1 (1 to 3, default 1.6)"))
       env.slash("othersize 1.75")
       assert.are.equal(1.75, env.GroupChevronDB.othersize)
       assert.are.equal(1.75, holder.scale)
@@ -3574,8 +3575,8 @@ describe("GroupChevron", function()
       local db = env.GroupChevronDB
       assert.are.equal("#FF4FD8", hex(db.color))
       assert.are.equal(3, db.chevsize)
-      assert.are.equal(1.75, db.textsize)
-      assert.are.equal(1, db.othersize)
+      assert.are.equal(2, db.textsize)
+      assert.are.equal(1.6, db.othersize)
       assert.are.equal(1, db.barsize)
       assert.are.equal(1.1, db.buffsize)
       assert.are.equal(1, db.otherbarsize)
