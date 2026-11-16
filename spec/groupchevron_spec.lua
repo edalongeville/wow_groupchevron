@@ -3308,7 +3308,7 @@ describe("GroupChevron", function()
       end
     end)
 
-    it("orders the sections Group members, Friendlies, Friends, Guildmates, Hostiles, then Reset", function()
+    it("orders the sections Members, Friends, Guildmates, Quest hostiles, Friendlies, Reset", function()
       local overrides, rec = widgetClient()
       load({ overrides = overrides })
       local content
@@ -3330,13 +3330,13 @@ describe("GroupChevron", function()
       local guild = labelY("Guildmates")
       local hostiles = labelY("Quest hostiles")
       assert.is_number(members)
-      assert.is_true(members > friendlies)
-      assert.is_true(friendlies > friends)
+      assert.is_true(members > friends)
       assert.is_true(friends > guild)
       assert.is_true(guild > hostiles)
+      assert.is_true(hostiles > friendlies)
       -- Reset sits below the last section.
       local reset = widget(rec, "Button", 2)
-      assert.is_true(hostiles > reset.points[1][5])
+      assert.is_true(friendlies > reset.points[1][5])
     end)
 
     it("draws one bordered frame per option group, without overlap, above the Reset button", function()
@@ -3355,6 +3355,8 @@ describe("GroupChevron", function()
         end
       end
       assert.are.equal(5, #boxes)
+      -- Created in a different order than they are laid out: from the top down.
+      table.sort(boxes, function(a, b) return a.points[1][5] > b.points[1][5] end)
       for i, b in ipairs(boxes) do
         -- No SetBackdrop in the fake client: the four texture lines are the border.
         assert.are.equal(4, #b.textures)

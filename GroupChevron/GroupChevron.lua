@@ -1979,18 +1979,19 @@ local function BuildPanel()
   end
 
   Group(L("group_members"), -84, 312)
-  Group(L("friendlies"), -406, 190)
-  Group(L("friends"), -606, 142)
-  Group(L("guildmates"), -758, 142)
+  Group(L("friendlies"), -952, 190)
+  Group(L("friends"), -406, 142)
+  Group(L("guildmates"), -558, 142)
 
-  -- Layout: Enabled, then the "Group members" settings, then the "Friendlies" ones
-  -- (friendly players outside the group), then the "Friends" ones (friends list, outside the
-  -- group), then the "Guildmates" ones (in your guild, outside the group), then the "Quest hostiles"
-  -- ones (enemies tied to a quest), then Reset. The specs find widgets by creation order, so the
+  -- Layout: Enabled, then the "Group members" settings, then the "Friends" ones (friends list,
+  -- outside the group), then the "Guildmates" ones (in your guild, outside the group), then the
+  -- "Quest hostiles" ones (enemies tied to a quest), then the "Friendlies" ones (friendly players
+  -- outside the group; the only section without a chevron), then Reset.
+  -- The specs find widgets by creation order, so the
   -- Friends widgets, then the guild chevron checkbox, then the class colour checkbox, then the
   -- Hostiles group and finally the name font control are created last.
   local enabledBox = Checkbox(L("enabled"), -48, SetEnabled)
-  local compactBox = Checkbox(L("compact"), -438, SetCompact)
+  local compactBox = Checkbox(L("compact"), -984, SetCompact)
 
   -- Name colour: a swatch that opens the colour picker (live apply, Cancel restores).
   Label(L("name_colour"), 16, -124)
@@ -2058,15 +2059,15 @@ local function BuildPanel()
   local sliders = {
     { "chevsize", Slider(L("chevron_size"), -164, "chevsize") },
     { "textsize", Slider(L("text_size"), -204, "textsize") },
-    { "othersize", Slider(L("text_size"), -480, "othersize") },
+    { "othersize", Slider(L("text_size"), -1026, "othersize") },
     { "barsize", Slider(L("bar_size"), -244, "barsize") },
     { "buffsize", Slider(L("buffs_size"), -284, "buffsize") },
-    { "otherbarsize", Slider(L("bar_size"), -520, "otherbarsize") },
+    { "otherbarsize", Slider(L("bar_size"), -1066, "otherbarsize") },
     { "namegap", Slider(L("name_gap"), -324, "namegap") },
-    { "othernamegap", Slider(L("name_gap"), -560, "othernamegap") },
+    { "othernamegap", Slider(L("name_gap"), -1106, "othernamegap") },
     { "memberoutlinesize", Slider(L("outline_size"), -364, "memberoutlinesize") },
-    { "friendoutlinesize", Slider(L("outline_size"), -708, "friendoutlinesize") },
-    { "guildoutlinesize", Slider(L("outline_size"), -860, "guildoutlinesize") },
+    { "friendoutlinesize", Slider(L("outline_size"), -508, "friendoutlinesize") },
+    { "guildoutlinesize", Slider(L("outline_size"), -660, "guildoutlinesize") },
   }
 
   local reset = CreateFrame("Button", nil, content, "UIPanelButtonTemplate")
@@ -2078,20 +2079,20 @@ local function BuildPanel()
   end)
 
   -- Friends (on your friends list, outside your group).
-  Label(L("name_colour"), 16, -646)
-  local friendFill = Swatch(-640, FriendColor, SetFriendColor, "friendcolor")
-  local friendChevronBox = Checkbox(L("show_chevron"), -668, function(v) SetFlag("friendchevron", v) end)
-  local bnetBox = Checkbox(L("bnet_friends"), -668, function(v) SetFlag("bnetfriends", v) end, 200)
+  Label(L("name_colour"), 16, -446)
+  local friendFill = Swatch(-440, FriendColor, SetFriendColor, "friendcolor")
+  local friendChevronBox = Checkbox(L("show_chevron"), -468, function(v) SetFlag("friendchevron", v) end)
+  local bnetBox = Checkbox(L("bnet_friends"), -468, function(v) SetFlag("bnetfriends", v) end, 200)
 
   -- Guildmates (in your guild, outside your group, not on your friends list).
-  Label(L("name_colour"), 16, -798)
-  local guildFill = Swatch(-792, GuildColor, SetGuildColor, "guildcolor")
-  local guildChevronBox = Checkbox(L("show_chevron"), -820, function(v) SetFlag("guildchevron", v) end)
+  Label(L("name_colour"), 16, -598)
+  local guildFill = Swatch(-592, GuildColor, SetGuildColor, "guildcolor")
+  local guildChevronBox = Checkbox(L("show_chevron"), -620, function(v) SetFlag("guildchevron", v) end)
 
   -- Friendlies: the class colour, beside "Compact plates".
-  local classBox = Checkbox(L("class_colour"), -438, function(v) SetFlag("classcolor", v) end, 260)
+  local classBox = Checkbox(L("class_colour"), -984, function(v) SetFlag("classcolor", v) end, 260)
   -- Friendlies: show level, beside "Class colour" (created last, see above).
-  local levelBox = Checkbox(L("show_level"), -438, function(v) SetFlag("showlevel", v) end, 440)
+  local levelBox = Checkbox(L("show_level"), -984, function(v) SetFlag("showlevel", v) end, 440)
 
   -- Live chevron previews beside the colour swatches: the same texture, tinted with the chosen colour,
   -- with the black outline of the section's thickness (none at 0). Textures of the content frame (no
@@ -2150,20 +2151,20 @@ local function BuildPanel()
     end
   end
   previews.memberoutlinesize = Preview(-118, false, Color, "memberoutlinesize")
-  previews.friendoutlinesize = Preview(-640, false, FriendColor, "friendoutlinesize")
-  previews.guildoutlinesize = Preview(-792, false, GuildColor, "guildoutlinesize")
+  previews.friendoutlinesize = Preview(-440, false, FriendColor, "friendoutlinesize")
+  previews.guildoutlinesize = Preview(-592, false, GuildColor, "guildoutlinesize")
 
   -- Hostiles (enemies tied to one of your quests): name colour (name and chevron), then the
   -- chevron size, text size and name height sliders. Created after the other sections and
   -- before the font control, so the existing widgets keep their creation order.
-  Group(L("hostiles"), -910, 232)
-  Label(L("name_colour"), 16, -950)
-  local hostileFill = Swatch(-944, HostileColor, SetHostileColor, "hostilecolor")
-  sliders[#sliders + 1] = { "hostilechevsize", Slider(L("chevron_size"), -990, "hostilechevsize") }
-  sliders[#sliders + 1] = { "hostilesize", Slider(L("text_size"), -1030, "hostilesize") }
-  sliders[#sliders + 1] = { "hostilenamegap", Slider(L("name_gap"), -1070, "hostilenamegap") }
-  sliders[#sliders + 1] = { "hostileoutlinesize", Slider(L("outline_size"), -1110, "hostileoutlinesize") }
-  previews.hostileoutlinesize = Preview(-944, true, HostileColor, "hostileoutlinesize")
+  Group(L("hostiles"), -710, 232)
+  Label(L("name_colour"), 16, -750)
+  local hostileFill = Swatch(-744, HostileColor, SetHostileColor, "hostilecolor")
+  sliders[#sliders + 1] = { "hostilechevsize", Slider(L("chevron_size"), -790, "hostilechevsize") }
+  sliders[#sliders + 1] = { "hostilesize", Slider(L("text_size"), -830, "hostilesize") }
+  sliders[#sliders + 1] = { "hostilenamegap", Slider(L("name_gap"), -870, "hostilenamegap") }
+  sliders[#sliders + 1] = { "hostileoutlinesize", Slider(L("outline_size"), -910, "hostileoutlinesize") }
+  previews.hostileoutlinesize = Preview(-744, true, HostileColor, "hostileoutlinesize")
 
   -- Name font: a drop-down listing Core.FONTS, beside the name colour of the group members.
   -- Without the client's UIDropDownMenu API it falls back to a button that cycles through them.
