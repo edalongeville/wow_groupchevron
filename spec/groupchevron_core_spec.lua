@@ -365,9 +365,9 @@ describe("GroupChevron Core", function()
     end)
 
     it("has an English and a French title for the options group", function()
-      assert.are.equal("Hostiles (enemies tied to your quests)", Core.Translate("enUS", "hostiles"))
-      assert.are.equal("Hostiles (ennemis liés à vos quêtes)", Core.Translate("frFR", "hostiles"))
-      assert.are.equal("Hostiles (enemies tied to your quests)", Core.Translate("deDE", "hostiles"))
+      assert.are.equal("Quest hostiles (enemies tied to your quests)", Core.Translate("enUS", "hostiles"))
+      assert.are.equal("Ennemis de quête (liés à vos quêtes)", Core.Translate("frFR", "hostiles"))
+      assert.are.equal("Quest hostiles (enemies tied to your quests)", Core.Translate("deDE", "hostiles"))
     end)
 
     -- questAPI: the injected functions for the hostile checks; quests[unit] is the quest answer.

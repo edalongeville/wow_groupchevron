@@ -1983,7 +1983,7 @@ local function BuildPanel()
 
   -- Layout: Enabled, then the "Group members" settings, then the "Friendlies" ones
   -- (friendly players outside the group), then the "Friends" ones (friends list, outside the
-  -- group), then the "Guildmates" ones (in your guild, outside the group), then the "Hostiles"
+  -- group), then the "Guildmates" ones (in your guild, outside the group), then the "Quest hostiles"
   -- ones (enemies tied to a quest), then Reset. The specs find widgets by creation order, so the
   -- Friends widgets, then the guild chevron checkbox, then the class colour checkbox, then the
   -- Hostiles group and finally the name font control are created last.
