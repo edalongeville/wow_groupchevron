@@ -1869,7 +1869,7 @@ local function BuildPanel()
   scroll:SetPoint("TOPLEFT", panel, "TOPLEFT", 0, -4)
   scroll:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -28, 4)
   local content = CreateFrame("Frame", nil, scroll)
-  content:SetSize(600, 1200)
+  content:SetSize(600, 1040)
   scroll:SetScrollChild(content)
 
   local function Label(text, x, y, template)
@@ -1978,10 +1978,10 @@ local function BuildPanel()
     return Label(title, 16, y - 8, "GameFontNormal")
   end
 
-  Group(L("group_members"), -84, 312)
-  Group(L("friendlies"), -952, 190)
-  Group(L("friends"), -406, 142)
-  Group(L("guildmates"), -558, 142)
+  Group(L("group_members"), -84, 272)
+  Group(L("friendlies"), -792, 190)
+  Group(L("friends"), -366, 102)
+  Group(L("guildmates"), -478, 102)
 
   -- Layout: Enabled, then the "Group members" settings, then the "Friends" ones (friends list,
   -- outside the group), then the "Guildmates" ones (in your guild, outside the group), then the
@@ -1991,7 +1991,7 @@ local function BuildPanel()
   -- Friends widgets, then the guild chevron checkbox, then the class colour checkbox, then the
   -- Hostiles group and finally the name font control are created last.
   local enabledBox = Checkbox(L("enabled"), -48, SetEnabled)
-  local compactBox = Checkbox(L("compact"), -984, SetCompact)
+  local compactBox = Checkbox(L("compact"), -824, SetCompact)
 
   -- Name colour: a swatch that opens the colour picker (live apply, Cancel restores).
   Label(L("name_colour"), 16, -124)
@@ -2004,7 +2004,9 @@ local function BuildPanel()
   -- The chevron previews by outline thickness kind (filled below): a slider of that kind redraws its
   -- preview while it is dragged, before the value is saved.
   local previews = {}
-  local function Slider(text, y, kind)
+  -- The outline thickness sliders sit to the right of the colour swatch and its chevron preview.
+  local OUTLINE_GEOMETRY = { 240, 350, 130, 490 }
+  local function Slider(text, y, kind, geometry)
     local isGap = Core.GAP_KINDS[kind] == true
     local min, max, step = Core.MinFactor(kind), Core.MaxFactor(kind), 0.05
     local fmt, default, set = "%.2f", Core.DefaultFactor(kind), SetFactor
@@ -2015,16 +2017,18 @@ local function BuildPanel()
       min, max, step = Core.MIN_GAP, Core.MAX_GAP, 1
       fmt, default, set, snap = "%d", Core.DefaultGap(kind), SetGap, Core.SnapGap
     end
-    Label(text, 16, y)
+    -- geometry (the outline thickness sliders, beside the colour swatch): label, slider and value x, width.
+    geometry = geometry or { 16, 160, 220, 392 }
+    Label(text, geometry[1], y)
     local s = CreateFrame("Slider", nil, content, "OptionsSliderTemplate")
-    s:SetPoint("TOPLEFT", content, "TOPLEFT", 160, y - 4)
-    s:SetWidth(220)
+    s:SetPoint("TOPLEFT", content, "TOPLEFT", geometry[2], y - 4)
+    s:SetWidth(geometry[3])
     s:SetMinMaxValues(min, max)
     s:SetValueStep(step)
     if type(s.SetObeyStepOnDrag) == "function" then
       s:SetObeyStepOnDrag(true)
     end
-    local valueText = Label("", 392, y)
+    local valueText = Label("", geometry[4], y)
     local dragging = false
     local function Show(v)
       valueText:SetText(string.format(fmt, snap(v) or default))
@@ -2059,40 +2063,40 @@ local function BuildPanel()
   local sliders = {
     { "chevsize", Slider(L("chevron_size"), -164, "chevsize") },
     { "textsize", Slider(L("text_size"), -204, "textsize") },
-    { "othersize", Slider(L("text_size"), -1026, "othersize") },
+    { "othersize", Slider(L("text_size"), -866, "othersize") },
     { "barsize", Slider(L("bar_size"), -244, "barsize") },
     { "buffsize", Slider(L("buffs_size"), -284, "buffsize") },
-    { "otherbarsize", Slider(L("bar_size"), -1066, "otherbarsize") },
+    { "otherbarsize", Slider(L("bar_size"), -906, "otherbarsize") },
     { "namegap", Slider(L("name_gap"), -324, "namegap") },
-    { "othernamegap", Slider(L("name_gap"), -1106, "othernamegap") },
-    { "memberoutlinesize", Slider(L("outline_size"), -364, "memberoutlinesize") },
-    { "friendoutlinesize", Slider(L("outline_size"), -508, "friendoutlinesize") },
-    { "guildoutlinesize", Slider(L("outline_size"), -660, "guildoutlinesize") },
+    { "othernamegap", Slider(L("name_gap"), -946, "othernamegap") },
+    { "memberoutlinesize", Slider(L("outline_size"), -124, "memberoutlinesize", OUTLINE_GEOMETRY) },
+    { "friendoutlinesize", Slider(L("outline_size"), -406, "friendoutlinesize", OUTLINE_GEOMETRY) },
+    { "guildoutlinesize", Slider(L("outline_size"), -518, "guildoutlinesize", OUTLINE_GEOMETRY) },
   }
 
   local reset = CreateFrame("Button", nil, content, "UIPanelButtonTemplate")
   reset:SetSize(160, 24)
-  reset:SetPoint("TOPLEFT", content, "TOPLEFT", 16, -1158)
+  reset:SetPoint("TOPLEFT", content, "TOPLEFT", 16, -998)
   reset:SetText(L("reset"))
   reset:SetScript("OnClick", function()
     SafeCall("options reset", ResetAll)
   end)
 
   -- Friends (on your friends list, outside your group).
-  Label(L("name_colour"), 16, -446)
-  local friendFill = Swatch(-440, FriendColor, SetFriendColor, "friendcolor")
-  local friendChevronBox = Checkbox(L("show_chevron"), -468, function(v) SetFlag("friendchevron", v) end)
-  local bnetBox = Checkbox(L("bnet_friends"), -468, function(v) SetFlag("bnetfriends", v) end, 200)
+  Label(L("name_colour"), 16, -406)
+  local friendFill = Swatch(-400, FriendColor, SetFriendColor, "friendcolor")
+  local friendChevronBox = Checkbox(L("show_chevron"), -428, function(v) SetFlag("friendchevron", v) end)
+  local bnetBox = Checkbox(L("bnet_friends"), -428, function(v) SetFlag("bnetfriends", v) end, 200)
 
   -- Guildmates (in your guild, outside your group, not on your friends list).
-  Label(L("name_colour"), 16, -598)
-  local guildFill = Swatch(-592, GuildColor, SetGuildColor, "guildcolor")
-  local guildChevronBox = Checkbox(L("show_chevron"), -620, function(v) SetFlag("guildchevron", v) end)
+  Label(L("name_colour"), 16, -518)
+  local guildFill = Swatch(-512, GuildColor, SetGuildColor, "guildcolor")
+  local guildChevronBox = Checkbox(L("show_chevron"), -540, function(v) SetFlag("guildchevron", v) end)
 
   -- Friendlies: the class colour, beside "Compact plates".
-  local classBox = Checkbox(L("class_colour"), -984, function(v) SetFlag("classcolor", v) end, 260)
+  local classBox = Checkbox(L("class_colour"), -824, function(v) SetFlag("classcolor", v) end, 260)
   -- Friendlies: show level, beside "Class colour" (created last, see above).
-  local levelBox = Checkbox(L("show_level"), -984, function(v) SetFlag("showlevel", v) end, 440)
+  local levelBox = Checkbox(L("show_level"), -824, function(v) SetFlag("showlevel", v) end, 440)
 
   -- Live chevron previews beside the colour swatches: the same texture, tinted with the chosen colour,
   -- with the black outline of the section's thickness (none at 0). Textures of the content frame (no
@@ -2105,6 +2109,11 @@ local function BuildPanel()
     local items = {}
     local height = (single and SINGLE_HEIGHT or CHEVRON_HEIGHT) * PREVIEW_SCALE
     local top = swatchY - (24 - height) / 2
+    -- A soft grey background, so that the colour and the black outline both stand out.
+    local backdrop = content:CreateTexture(nil, "BACKGROUND")
+    backdrop:SetColorTexture(0.78, 0.78, 0.78, 1)
+    backdrop:SetSize(40, 28)
+    backdrop:SetPoint("TOPLEFT", content, "TOPLEFT", 184, swatchY + 2)
     local function Add(offset, alpha)
       local v = content:CreateTexture(nil, "OVERLAY")
       local ok, loaded = pcall(v.SetTexture, v, CHEVRON_TEXTURE)
@@ -2151,25 +2160,26 @@ local function BuildPanel()
     end
   end
   previews.memberoutlinesize = Preview(-118, false, Color, "memberoutlinesize")
-  previews.friendoutlinesize = Preview(-440, false, FriendColor, "friendoutlinesize")
-  previews.guildoutlinesize = Preview(-592, false, GuildColor, "guildoutlinesize")
+  previews.friendoutlinesize = Preview(-400, false, FriendColor, "friendoutlinesize")
+  previews.guildoutlinesize = Preview(-512, false, GuildColor, "guildoutlinesize")
 
   -- Hostiles (enemies tied to one of your quests): name colour (name and chevron), then the
   -- chevron size, text size and name height sliders. Created after the other sections and
   -- before the font control, so the existing widgets keep their creation order.
-  Group(L("hostiles"), -710, 232)
-  Label(L("name_colour"), 16, -750)
-  local hostileFill = Swatch(-744, HostileColor, SetHostileColor, "hostilecolor")
-  sliders[#sliders + 1] = { "hostilechevsize", Slider(L("chevron_size"), -790, "hostilechevsize") }
-  sliders[#sliders + 1] = { "hostilesize", Slider(L("text_size"), -830, "hostilesize") }
-  sliders[#sliders + 1] = { "hostilenamegap", Slider(L("name_gap"), -870, "hostilenamegap") }
-  sliders[#sliders + 1] = { "hostileoutlinesize", Slider(L("outline_size"), -910, "hostileoutlinesize") }
-  previews.hostileoutlinesize = Preview(-744, true, HostileColor, "hostileoutlinesize")
+  Group(L("hostiles"), -590, 192)
+  Label(L("name_colour"), 16, -630)
+  local hostileFill = Swatch(-624, HostileColor, SetHostileColor, "hostilecolor")
+  sliders[#sliders + 1] = { "hostilechevsize", Slider(L("chevron_size"), -670, "hostilechevsize") }
+  sliders[#sliders + 1] = { "hostilesize", Slider(L("text_size"), -710, "hostilesize") }
+  sliders[#sliders + 1] = { "hostilenamegap", Slider(L("name_gap"), -750, "hostilenamegap") }
+  sliders[#sliders + 1] = { "hostileoutlinesize", Slider(L("outline_size"), -630, "hostileoutlinesize",
+    OUTLINE_GEOMETRY) }
+  previews.hostileoutlinesize = Preview(-624, true, HostileColor, "hostileoutlinesize")
 
   -- Name font: a drop-down listing Core.FONTS, beside the name colour of the group members.
   -- Without the client's UIDropDownMenu API it falls back to a button that cycles through them.
   -- Created last: the specs find buttons by creation order.
-  Label(L("name_font"), 260, -124)
+  Label(L("name_font"), 260, -54)
   local function CurrentFont()
     return Core.FindFont(type(db) == "table" and db.font) or Core.FONTS[1]
   end
@@ -2180,7 +2190,7 @@ local function BuildPanel()
       error("no drop-down API")
     end
     local drop = CreateFrame("Frame", nil, content, "UIDropDownMenuTemplate")
-    drop:SetPoint("TOPLEFT", content, "TOPLEFT", 340, -118)
+    drop:SetPoint("TOPLEFT", content, "TOPLEFT", 340, -48)
     if type(UIDropDownMenu_SetWidth) == "function" then
       UIDropDownMenu_SetWidth(drop, 160)
     end
@@ -2206,7 +2216,7 @@ local function BuildPanel()
   if not dropOk then
     local fontButton = CreateFrame("Button", nil, content, "UIPanelButtonTemplate")
     fontButton:SetSize(200, 24)
-    fontButton:SetPoint("TOPLEFT", content, "TOPLEFT", 360, -118)
+    fontButton:SetPoint("TOPLEFT", content, "TOPLEFT", 360, -48)
     ShowFont = function()
       fontButton:SetText(CurrentFont().label)
     end

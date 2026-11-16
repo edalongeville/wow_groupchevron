@@ -12,7 +12,7 @@ The addon is still being tested.
 - Adds a blue chevron above friends (and Battle.net friends)
 - Adds a green chevron above guildmates
 - Adds a yellow single chevron and a yellow name above hostile units tied to one of your quests (kill, item drop, ...), with its own colour, chevron size, text size and name height in the **Quest hostiles** section of the options
-- Every chevron has a black outline (one **Outline thickness** slider per section: group members, friends, guildmates, quest hostiles; default 2, from 0 = no outline to 5) and the options page shows a live preview of the chevron, in the chosen colour, beside each colour swatch.
+- Every chevron has a black outline (one **Outline** slider per section: group members, friends, guildmates, quest hostiles; default 2, from 0 = no outline to 5) and the options page shows a live preview of the chevron, in the chosen colour, beside each colour swatch.
 - Changes the nameplate font
 - Colors names by class
 - Displays friendlies' (non-grouped players') health bars only when below 100%
