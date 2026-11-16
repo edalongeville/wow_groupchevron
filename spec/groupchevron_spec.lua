@@ -155,7 +155,7 @@ end
 -- NEUTRAL_SETTINGS are the settings the specs run with unless they say otherwise (see load).
 local NEUTRAL_SETTINGS = {
   chevsize = 1, textsize = 1, buffsize = 1, namegap = 0, othernamegap = 0, font = "default", classcolor = false,
-  hostilechevsize = 1, hostilesize = 1, hostilenamegap = 0,
+  hostilechevsize = 1, friendchevsize = 1, guildchevsize = 1, hostilesize = 1, hostilenamegap = 0,
 }
 
 local function load(opts)
@@ -2979,6 +2979,22 @@ describe("GroupChevron", function()
       assert.is_true(outlines(env.chevron(plate))[1].shown)
     end)
 
+    it("sizes the chevron of a friend and of a guildmate by their own settings, not by chevsize", function()
+      local env = load()
+      local plate = newPlate("nameplate1", "Friend", BLUE)
+      env.world.plates.nameplate1 = plate
+      env.world.players.nameplate1, env.world.friends.nameplate1, env.world.flist.nameplate1 = true, true, true
+      env.fire("NAME_PLATE_UNIT_ADDED", "nameplate1")
+      assert.are.equal(10, env.chevron(plate).w) -- friendchevsize is 1 in these specs
+      env.slash("chevsize 4")
+      assert.are.equal(10, env.chevron(plate).w)
+      env.slash("friendchevsize 2.5")
+      assert.are.equal(25, env.chevron(plate).w)
+      env.slash("guildchevsize 4")
+      assert.are.equal(4, env.GroupChevronDB.guildchevsize)
+      assert.are.equal(25, env.chevron(plate).w)
+    end)
+
     it("takes the hostile colour for the name and the chevron, from /gchev hostilecolor", function()
       local env = load()
       local plate = newTreePlate("nameplate2")
@@ -3502,7 +3518,7 @@ describe("GroupChevron", function()
       assert.are.equal(7, env.GroupChevronDB.hostilenamegap)
       hostileGap.scripts.OnValueChanged(hostileGap, 41)
       assert.are.equal(7, env.GroupChevronDB.hostilenamegap)
-      assert.is_nil(widget(rec, "Slider", 16))
+      assert.is_nil(widget(rec, "Slider", 18))
       assert.are.equal(2.25, env.GroupChevronDB.textsize)
 
       -- The panel shows the saved gaps when it opens.

@@ -662,6 +662,12 @@ describe("GroupChevron Core", function()
       assert.is_true(db.bnetfriends)
     end)
 
+    it("defaults the chevron size of the friends and of the guildmates to 3 (1 to 5)", function()
+      local db = Core.InitDB({ friendchevsize = 4.5, guildchevsize = 9 })
+      assert.are.equal(4.5, db.friendchevsize)
+      assert.are.equal(3, db.guildchevsize)
+    end)
+
     it("defaults the outline thickness to 2 (0 to 5) for every kind, 0 meaning no outline", function()
       local db = Core.InitDB({ guildoutlinesize = 4, hostileoutlinesize = 9, friendoutlinesize = 0 })
       assert.are.equal(0, db.friendoutlinesize)
