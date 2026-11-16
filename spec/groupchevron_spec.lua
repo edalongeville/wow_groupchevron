@@ -3709,13 +3709,21 @@ describe("GroupChevron", function()
         hostile[#hostile + 1] = owned[i]
       end
       assert.is_true(hostile[1].shown)
-      -- Default thickness 2: 0.1875 * 2 * 3.2 points to the right for the first copy.
-      assert.is_true(math.abs(hostile[1].points[1][4] - 1.2) < 1e-9)
+      -- Thickness 2 at chevron size 1 (these specs): 0.1875 * 2 * 1 points to the right for the first copy.
+      assert.is_true(math.abs(hostile[1].points[1][4] - 0.375) < 1e-9)
       local slider = widget(rec, "Slider", 15)
       slider.scripts.OnMouseDown(slider)
       slider.scripts.OnValueChanged(slider, 3)
-      assert.is_true(math.abs(hostile[1].points[1][4] - 1.8) < 1e-9)
+      assert.is_true(math.abs(hostile[1].points[1][4] - 0.5625) < 1e-9)
       assert.are.equal(2, env.GroupChevronDB.hostileoutlinesize) -- not saved before the release
+      -- The chevron size slider resizes the preview too (the square is 72 wide, the "V" 10 * size).
+      assert.are.equal(10, hostile[1].w)
+      local size = widget(rec, "Slider", 12)
+      size.scripts.OnValueChanged(size, 5)
+      assert.are.equal(50, hostile[1].w)
+      assert.are.equal(25, hostile[1].owner.h)
+      size.scripts.OnValueChanged(size, 1)
+      assert.are.equal(10, hostile[1].w)
       slider.scripts.OnValueChanged(slider, 0)
       assert.is_false(hostile[1].shown)
       slider.scripts.OnValueChanged(slider, 4)

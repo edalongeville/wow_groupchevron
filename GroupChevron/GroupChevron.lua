@@ -2003,8 +2003,9 @@ local function BuildPanel()
   -- when changed without dragging, e.g. the mouse wheel), so a drag does not spam RefreshAll.
   -- A size slider (Core factors, 0.05 steps, SetFactor) or, for a kind of Core.GAP_KINDS, a
   -- name gap slider (whole points, SetGap).
-  -- The chevron previews by outline thickness kind (filled below): a slider of that kind redraws its
-  -- preview while it is dragged, before the value is saved.
+  -- The chevron previews (filled below, { thicknessKind, sizeKind, update }): a slider of the outline
+  -- thickness or of the chevron size of a preview redraws it while it is dragged, before the value
+  -- is saved.
   local previews = {}
   -- The outline thickness sliders sit right below the colour swatch, left of the chevron preview.
   local OUTLINE_GEOMETRY = { 16, 90, 140, 240 }
@@ -2034,8 +2035,10 @@ local function BuildPanel()
     local dragging = false
     local function Show(v)
       valueText:SetText(string.format(fmt, snap(v) or default))
-      if previews[kind] then
-        previews[kind](snap(v))
+      for _, preview in ipairs(previews) do
+        if preview.thicknessKind == kind or preview.sizeKind == kind then
+          preview.update(kind, snap(v))
+        end
       end
     end
     s:SetScript("OnValueChanged", function(_, v)
@@ -2104,17 +2107,15 @@ local function BuildPanel()
   -- with the black outline of the section's thickness (none at 0). Textures of the content frame (no
   -- frames of their own), updated by RefreshPanel, and by the thickness slider while it is dragged.
 
-  local PREVIEW_SCALE = 3.2 -- panel points per chevron unit
-  local PREVIEW_X, PREVIEW_SIZE = 290, 64 -- the grey rounded square: left edge, side
+  local PREVIEW_X, PREVIEW_SIZE = 290, 72 -- the grey rounded square: left edge, side
   -- Preview draws a chevron (single: one "V", else the double chevron) in a grey rounded square to
-  -- the right of the section's colour and outline rows (the colour swatch is at swatchY), and
-  -- returns the function that colours it with get() and draws its outline.
-  local function Preview(swatchY, single, get, thicknessKind)
+  -- the right of the section's colour and outline rows (the colour swatch is at swatchY), at the size
+  -- of the plates' chevron (sizeKind: 1 to 5 points per chevron unit) with its outline (thicknessKind).
+  -- It adds { thicknessKind, sizeKind, update } to previews; update(kind, value) redraws it, with the
+  -- value being dragged for that kind, else the saved ones, and colours it with get().
+  local function Preview(swatchY, single, get, thicknessKind, sizeKind)
     local items = {}
-    local height = (single and SINGLE_HEIGHT or CHEVRON_HEIGHT) * PREVIEW_SCALE
     local squareTop = swatchY + 6
-    local top = squareTop - (PREVIEW_SIZE - height) / 2
-    local left = PREVIEW_X + (PREVIEW_SIZE - V_WIDTH * PREVIEW_SCALE) / 2
     -- A grey rounded square, so that the colour and the black outline both stand out (a plain
     -- square when the client cannot load the texture).
     local backdrop = content:CreateTexture(nil, "BACKGROUND")
@@ -2126,42 +2127,45 @@ local function BuildPanel()
     end
     backdrop:SetSize(PREVIEW_SIZE, PREVIEW_SIZE)
     backdrop:SetPoint("TOPLEFT", content, "TOPLEFT", PREVIEW_X, squareTop)
-    local function Add(offset, alpha)
+    local function Add(step, alpha)
       local v = content:CreateTexture(nil, "OVERLAY")
       local vok, vloaded = pcall(v.SetTexture, v, CHEVRON_TEXTURE)
       if not vok or vloaded == false then
         Method(v, "Hide")
         return
       end
-      v:SetSize(V_WIDTH * PREVIEW_SCALE, V_HEIGHT * PREVIEW_SCALE)
-      v:SetPoint("TOPLEFT", content, "TOPLEFT", left, top - offset)
       v:SetAlpha(alpha)
       local outlines = {}
       for _, dir in ipairs(OUTLINE_DIRS) do
         local outline = content:CreateTexture(nil, "ARTWORK")
         outline:SetTexture(CHEVRON_TEXTURE)
-        outline:SetSize(V_WIDTH * PREVIEW_SCALE, V_HEIGHT * PREVIEW_SCALE)
         outline:SetVertexColor(0, 0, 0, 1)
         outline:SetAlpha(alpha)
         outline.dx, outline.dy, outline.owner = dir[1], dir[2], v
         outlines[#outlines + 1] = outline
       end
-      items[#items + 1] = { v = v, outlines = outlines }
+      items[#items + 1] = { v = v, outlines = outlines, step = step }
     end
     Add(0, 1)
     if not single then
-      Add(STEP * PREVIEW_SCALE, LOWER_ALPHA)
+      Add(STEP, LOWER_ALPHA)
     end
-    -- thickness: the value being dragged, else the saved one.
-    return function(thickness)
+    local function Update(kind, value)
       local r, g, b = get()
-      thickness = thickness or Factor(thicknessKind)
+      local thickness = kind == thicknessKind and value or Factor(thicknessKind)
+      local f = kind == sizeKind and value or Factor(sizeKind)
+      local top = squareTop - (PREVIEW_SIZE - (single and SINGLE_HEIGHT or CHEVRON_HEIGHT) * f) / 2
+      local left = PREVIEW_X + (PREVIEW_SIZE - V_WIDTH * f) / 2
+      local offset = OUTLINE_UNIT * thickness * f
       for _, item in ipairs(items) do
         item.v:SetVertexColor(r, g, b, 1)
-        local offset = OUTLINE_UNIT * thickness * PREVIEW_SCALE
+        item.v:SetSize(V_WIDTH * f, V_HEIGHT * f)
+        item.v:ClearAllPoints()
+        item.v:SetPoint("TOPLEFT", content, "TOPLEFT", left, top - item.step * f)
         for _, outline in ipairs(item.outlines) do
+          outline:SetSize(V_WIDTH * f, V_HEIGHT * f)
           outline:ClearAllPoints()
-          outline:SetPoint("CENTER", outline.owner, "CENTER", outline.dx * offset, outline.dy * offset)
+          outline:SetPoint("CENTER", item.v, "CENTER", outline.dx * offset, outline.dy * offset)
           if thickness > 0 then
             outline:Show()
           else
@@ -2170,10 +2174,11 @@ local function BuildPanel()
         end
       end
     end
+    previews[#previews + 1] = { thicknessKind = thicknessKind, sizeKind = sizeKind, update = Update }
   end
-  previews.memberoutlinesize = Preview(-118, false, Color, "memberoutlinesize")
-  previews.friendoutlinesize = Preview(-440, false, FriendColor, "friendoutlinesize")
-  previews.guildoutlinesize = Preview(-592, false, GuildColor, "guildoutlinesize")
+  Preview(-118, false, Color, "memberoutlinesize", "chevsize")
+  Preview(-440, false, FriendColor, "friendoutlinesize", "chevsize")
+  Preview(-592, false, GuildColor, "guildoutlinesize", "chevsize")
 
   -- Hostiles (enemies tied to one of your quests): name colour (name and chevron), then the
   -- chevron size, text size and name height sliders. Created after the other sections and
@@ -2187,7 +2192,7 @@ local function BuildPanel()
   sliders[#sliders + 1] = {
     "hostileoutlinesize", Slider(L("outline_size"), -790, "hostileoutlinesize", OUTLINE_GEOMETRY),
   }
-  previews.hostileoutlinesize = Preview(-744, true, HostileColor, "hostileoutlinesize")
+  Preview(-744, true, HostileColor, "hostileoutlinesize", "hostilechevsize")
 
   -- Name font: a drop-down listing Core.FONTS, beside the name colour of the group members.
   -- Without the client's UIDropDownMenu API it falls back to a button that cycles through them.
@@ -2255,8 +2260,8 @@ local function BuildPanel()
       guildFill:SetColorTexture(GuildColor())
       guildChevronBox:SetChecked(Flag("guildchevron"))
       hostileFill:SetColorTexture(HostileColor())
-      for _, update in pairs(previews) do
-        update()
+      for _, preview in ipairs(previews) do
+        preview.update()
       end
       classBox:SetChecked(Flag("classcolor"))
       levelBox:SetChecked(Flag("showlevel"))
