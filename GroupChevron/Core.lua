@@ -89,6 +89,9 @@ end
 -- Size factors of the chevron and of the name text: 1 (default) to 3, except the chevron sizes
 -- (chevsize, and hostilechevsize for the single chevron of the hostiles), which go up to 5.
 Core.MIN_FACTOR = 1
+-- The outline thicknesses (memberoutlinesize, friendoutlinesize, guildoutlinesize, hostileoutlinesize)
+-- start at 0: no outline.
+Core.MIN_FACTORS = { memberoutlinesize = 0, friendoutlinesize = 0, guildoutlinesize = 0, hostileoutlinesize = 0 }
 Core.DEFAULT_MAX_FACTOR = 3
 Core.MAX_FACTORS = { chevsize = 5, hostilechevsize = 5, memberoutlinesize = 5, friendoutlinesize = 5,
   guildoutlinesize = 5, hostileoutlinesize = 5 }
@@ -109,13 +112,18 @@ function Core.MaxFactor(kind)
   return Core.MAX_FACTORS[kind] or Core.DEFAULT_MAX_FACTOR
 end
 
--- ValidFactor is true for a finite number from MIN_FACTOR to MaxFactor(kind).
+-- MinFactor is the smallest accepted value of a factor kind (MIN_FACTOR for every other or nil kind).
+function Core.MinFactor(kind)
+  return Core.MIN_FACTORS[kind] or Core.MIN_FACTOR
+end
+
+-- ValidFactor is true for a finite number from MinFactor(kind) to MaxFactor(kind).
 function Core.ValidFactor(v, kind)
-  return type(v) == "number" and v == v and v >= Core.MIN_FACTOR and v <= Core.MaxFactor(kind)
+  return type(v) == "number" and v == v and v >= Core.MinFactor(kind) and v <= Core.MaxFactor(kind)
 end
 
 -- ParseFactor parses a decimal number such as "1", "3" or "1.25" (surrounding spaces ignored)
--- and returns it when it is within 1..MaxFactor(kind). Anything else (text, empty, hex,
+-- and returns it when it is within MinFactor(kind)..MaxFactor(kind). Anything else (text, empty, hex,
 -- exponent, out of range) returns nil: there is no clamping.
 function Core.ParseFactor(s, kind)
   if type(s) ~= "string" then
@@ -375,9 +383,7 @@ function Core.InitDB(db)
   else
     db.hostilecolor = { db.hostilecolor[1], db.hostilecolor[2], db.hostilecolor[3] }
   end
-  -- The black outline of each kind of chevron (members, friends, guildmates, hostiles): on.
-  for _, key in ipairs({ "friendchevron", "bnetfriends", "guildchevron", "showlevel", "memberoutline",
-    "friendoutline", "guildoutline", "hostileoutline" }) do
+  for _, key in ipairs({ "friendchevron", "bnetfriends", "guildchevron", "showlevel" }) do
     if type(db[key]) ~= "boolean" then
       db[key] = true
     end

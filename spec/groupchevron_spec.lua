@@ -2972,10 +2972,10 @@ describe("GroupChevron", function()
       env.slash("hostileoutlinesize 4")
       assert.are.equal(4, env.GroupChevronDB.hostileoutlinesize)
       assert.are.equal(0.75, outlines(env.chevron(plate))[1].points[1][4])
-      env.slash("hostileoutline off")
-      assert.is_false(env.GroupChevronDB.hostileoutline)
+      env.slash("hostileoutlinesize 0")
+      assert.are.equal(0, env.GroupChevronDB.hostileoutlinesize)
       assert.is_false(outlines(env.chevron(plate))[1].shown)
-      env.slash("hostileoutline on")
+      env.slash("hostileoutlinesize 1")
       assert.is_true(outlines(env.chevron(plate))[1].shown)
     end)
 
@@ -3686,6 +3686,38 @@ describe("GroupChevron", function()
       assert.is_true(env.GroupChevronDB.classcolor)
       assert.is_true(classBox.checked)
       assert.are.equal("#00FFFF", hex(plate.UnitFrame.name.color))
+    end)
+
+    it("redraws the chevron previews with the outline thickness while its slider is dragged", function()
+      local overrides, rec = widgetClient()
+      local env = load({ overrides = overrides })
+      rec.frame.scripts.OnShow(rec.frame)
+      local owned = {}
+      for _, c in ipairs(rec.created) do
+        for _, t in ipairs(c.f.textures or {}) do
+          if t.owner then
+            owned[#owned + 1] = t
+          end
+        end
+      end
+      -- Members, friends and guildmates: two "V"s of eight copies each; hostiles: one "V".
+      assert.are.equal(3 * 16 + 8, #owned)
+      local hostile = {}
+      for i = #owned - 7, #owned do
+        hostile[#hostile + 1] = owned[i]
+      end
+      assert.is_true(hostile[1].shown)
+      -- Default thickness 2: 0.1875 * 2 * 2.4 points to the right for the first copy.
+      assert.is_true(math.abs(hostile[1].points[1][4] - 0.9) < 1e-9)
+      local slider = widget(rec, "Slider", 15)
+      slider.scripts.OnMouseDown(slider)
+      slider.scripts.OnValueChanged(slider, 3)
+      assert.is_true(math.abs(hostile[1].points[1][4] - 1.35) < 1e-9)
+      assert.are.equal(2, env.GroupChevronDB.hostileoutlinesize) -- not saved before the release
+      slider.scripts.OnValueChanged(slider, 0)
+      assert.is_false(hostile[1].shown)
+      slider.scripts.OnValueChanged(slider, 4)
+      assert.is_true(hostile[1].shown)
     end)
 
     it("has a Show level checkbox in the Friendlies section, reset by Reset to defaults", function()
