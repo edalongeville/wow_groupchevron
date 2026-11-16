@@ -267,6 +267,7 @@ Core.Locales = {
     friends = "Friends (on your friends list, outside your group)",
     guildmates = "Guildmates (in your guild, outside your group)",
     hostiles = "Hostiles (enemies tied to your quests)",
+    outline = "Outline",
     compact = "Compact plates (name only)",
     name_colour = "Name colour",
     name_font = "Name font",
@@ -288,6 +289,7 @@ Core.Locales = {
     friends = "Amis (sur votre liste d'amis, hors de votre groupe)",
     guildmates = "Membres de la guilde (hors de votre groupe)",
     hostiles = "Hostiles (ennemis liés à vos quêtes)",
+    outline = "Contour",
     compact = "Plaques compactes (nom seul)",
     name_colour = "Couleur du nom",
     name_font = "Police du nom",
@@ -368,7 +370,9 @@ function Core.InitDB(db)
   else
     db.hostilecolor = { db.hostilecolor[1], db.hostilecolor[2], db.hostilecolor[3] }
   end
-  for _, key in ipairs({ "friendchevron", "bnetfriends", "guildchevron", "showlevel" }) do
+  -- The black outline of each kind of chevron (members, friends, guildmates, hostiles): on.
+  for _, key in ipairs({ "friendchevron", "bnetfriends", "guildchevron", "showlevel", "memberoutline",
+    "friendoutline", "guildoutline", "hostileoutline" }) do
     if type(db[key]) ~= "boolean" then
       db[key] = true
     end

@@ -334,6 +334,17 @@ local function load(opts)
   return env
 end
 
+-- vcount counts the "V" textures of a chevron frame (not their black outlines).
+local function vcount(frame)
+  local n = 0
+  for _, t in ipairs(frame.textures) do
+    if t.texture == "Interface\\AddOns\\GroupChevron\\chevron.tga" then
+      n = n + 1
+    end
+  end
+  return n
+end
+
 local function hex(c)
   return string.format("#%02X%02X%02X", math.floor(c[1] * 255 + 0.5), math.floor(c[2] * 255 + 0.5),
     math.floor(c[3] * 255 + 0.5))
@@ -411,7 +422,7 @@ describe("GroupChevron", function()
     local ch = env.chevron(member)
     assert.is_truthy(ch)
     assert.is_true(ch.shown)
-    assert.are.equal(2, #ch.textures)
+    assert.are.equal(2, vcount(ch))
     assert.are.equal("Interface\\AddOns\\GroupChevron\\chevron.tga", ch.textures[1].texture)
     assert.are.equal("#FF4FD8", hex(ch.textures[1].vertex))
     -- The full name is ours, in pink, over Blizzard's (faded), and carries the chevron.
@@ -2851,7 +2862,7 @@ describe("GroupChevron", function()
       -- One "V", fully opaque, in the hostile colour, anchored on our name.
       local ch = env.chevron(plate)
       assert.is_true(ch.shown)
-      assert.are.equal(1, #ch.textures)
+      assert.are.equal(1, vcount(ch))
       assert.are.equal("Interface\\AddOns\\GroupChevron\\chevron.tga", ch.textures[1].texture)
       assert.are.equal("#FFFF00", hex(ch.textures[1].vertex))
       assert.are.equal(1, ch.textures[1].alpha)
@@ -2935,6 +2946,33 @@ describe("GroupChevron", function()
       label, holder = env.label(plate)
       assert.are.equal(1, holder.scale)
       assert.are.equal(-3, label.points[1][5])
+    end)
+
+    it("draws a black outline under the chevron, per kind, off with /gchev hostileoutline off", function()
+      local env = load()
+      local plate = newPlate("nameplate1", "Orc", BLUE)
+      env.world.plates.nameplate1 = plate
+      env.world.attackable.nameplate1, env.world.quests.nameplate1 = true, true
+      env.fire("NAME_PLATE_UNIT_ADDED", "nameplate1")
+      local function outlines(ch)
+        local out = {}
+        for _, t in ipairs(ch.textures) do
+          if t.texture == "Interface\\AddOns\\GroupChevron\\chevron_outline.tga" then
+            out[#out + 1] = t
+          end
+        end
+        return out
+      end
+      local ch = env.chevron(plate)
+      assert.are.equal(1, #outlines(ch))
+      assert.are.equal("#000000", hex(outlines(ch)[1].vertex))
+      assert.is_true(outlines(ch)[1].shown)
+      assert.are.equal(12.5, outlines(ch)[1].w)
+      env.slash("hostileoutline off")
+      assert.is_false(env.GroupChevronDB.hostileoutline)
+      assert.is_false(outlines(env.chevron(plate))[1].shown)
+      env.slash("hostileoutline on")
+      assert.is_true(outlines(env.chevron(plate))[1].shown)
     end)
 
     it("takes the hostile colour for the name and the chevron, from /gchev hostilecolor", function()
@@ -3045,7 +3083,7 @@ describe("GroupChevron", function()
       env.world.players.nameplate2, env.world.friends.nameplate2, env.world.flist.nameplate2 = true, true, true
       env.fire("NAME_PLATE_UNIT_ADDED", "nameplate2")
       assert.are.equal(1, #frames())
-      assert.are.equal(2, #frames()[1].textures)
+      assert.are.equal(2, vcount(frames()[1]))
       assert.is_true(frames()[1].shown)
 
       -- The UnitFrame now shows a hostile quest unit: the single "V" only.
@@ -3055,7 +3093,7 @@ describe("GroupChevron", function()
       assert.are.equal(2, #frames())
       assert.is_false(frames()[1].shown)
       assert.is_true(frames()[2].shown)
-      assert.are.equal(1, #frames()[2].textures)
+      assert.are.equal(1, vcount(frames()[2]))
       assert.are.equal("#FFFF00", hex(env.label(plate).color))
 
       -- And back to the friend: the double chevron again, the single one hidden.
@@ -3650,7 +3688,7 @@ describe("GroupChevron", function()
       local overrides, rec = widgetClient()
       local env = load({ overrides = overrides })
       local levelBox = widget(rec, "CheckButton", 7)
-      assert.is_nil(widget(rec, "CheckButton", 8))
+      assert.is_nil(widget(rec, "CheckButton", 12))
       rec.frame.scripts.OnShow(rec.frame)
       assert.is_true(levelBox.checked)
       levelBox.checked = false
