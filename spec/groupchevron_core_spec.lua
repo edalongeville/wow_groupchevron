@@ -1554,6 +1554,185 @@ describe("GroupChevron Core", function()
   end)
 end)
 
+describe("Core service NPCs", function()
+  local GUID = "Creature-0-4372-0-1-352-0000ABCDEF"
+
+  -- npcAPI is a world with one friendly NPC "nameplate5" (creature 352) whose tooltip's second
+  -- line is subtitle, on a client in locale.
+  local function npcAPI(subtitle, locale, overrides)
+    local api = {
+      UnitIsPlayer = function() return false end,
+      UnitInParty = function() return false end,
+      UnitInRaid = function() return nil end,
+      UnitIsUnit = function(a, b) return a == b end,
+      UnitIsFriend = function() return true end,
+      UnitCanAttack = function() return false end,
+      UnitGUID = function() return GUID end,
+      GetLocale = function() return locale or "enUS" end,
+      GetTooltipUnit = function()
+        return { lines = { { leftText = "Thor" }, subtitle and { leftText = subtitle } or nil } }
+      end,
+    }
+    for k, v in pairs(overrides or {}) do
+      api[k] = v
+    end
+    return api
+  end
+
+  local ON = { enabled = true, services = true, npcroles = {} }
+
+  it("lists the roles in priority order, each with an icon", function()
+    local keys = {}
+    for _, r in ipairs(Core.ROLES) do
+      keys[#keys + 1] = r.key
+      assert.is_string(Core.RoleIcon(r.key))
+    end
+    assert.are.same({ "flight", "innkeeper", "banker", "auctioneer", "stable", "trainer", "repair", "vendor" }, keys)
+    assert.is_nil(Core.RoleIcon("nope"))
+    assert.is_false(Core.ValidRole("nope"))
+    assert.is_false(Core.ValidRole(nil))
+  end)
+
+  it("keeps the better of two roles", function()
+    assert.are.equal("repair", Core.BetterRole("vendor", "repair"))
+    assert.are.equal("innkeeper", Core.BetterRole("innkeeper", "vendor"))
+    assert.are.equal("flight", Core.BetterRole(nil, "flight"))
+    assert.are.equal("flight", Core.BetterRole("flight", "bogus"))
+    assert.is_nil(Core.BetterRole(nil, "bogus"))
+  end)
+
+  it("reads the creature ID of an NPC's GUID only", function()
+    assert.are.equal(352, Core.NpcID(GUID))
+    assert.are.equal(1234, Core.NpcID("Vehicle-0-1-2-3-1234-00AB"))
+    assert.is_nil(Core.NpcID("Player-1085-0998E434"))
+    assert.is_nil(Core.NpcID("Pet-0-4372-0-1-416-0100ABCDEF"))
+    assert.is_nil(Core.NpcID("GameObject-0-1-2-3-55-00AB"))
+    assert.is_nil(Core.NpcID("Creature-0-1-2-3-0-00AB"))
+    assert.is_nil(Core.NpcID(""))
+    assert.is_nil(Core.NpcID(nil))
+  end)
+
+  it("finds the role in an English or French subtitle", function()
+    assert.are.equal("flight", Core.SubtitleRole("<Gryphon Master>", "enUS"))
+    assert.are.equal("flight", Core.SubtitleRole("Wind Rider Master", "enGB"))
+    assert.are.equal("innkeeper", Core.SubtitleRole("Innkeeper", "enUS"))
+    assert.are.equal("repair", Core.SubtitleRole("Armorer & Shieldcrafter", "enUS"))
+    assert.are.equal("vendor", Core.SubtitleRole("Trade Supplies", "enUS"))
+    assert.are.equal("trainer", Core.SubtitleRole("Blacksmithing Trainer", "enUS"))
+    assert.are.equal("stable", Core.SubtitleRole("Stable Master", "enUS"))
+    assert.are.equal("flight", Core.SubtitleRole("Maître des griffons", "frFR"))
+    assert.are.equal("innkeeper", Core.SubtitleRole("Aubergiste", "frFR"))
+    assert.are.equal("vendor", Core.SubtitleRole("Marchande de nourriture", "frFR"))
+    -- No subtitle (the level line), no words for the locale, nothing readable: no role.
+    assert.is_nil(Core.SubtitleRole("Level 30", "enUS"))
+    assert.is_nil(Core.SubtitleRole("Innkeeper", "deDE"))
+    assert.is_nil(Core.SubtitleRole("Innkeeper", nil))
+    assert.is_nil(Core.SubtitleRole(nil, "enUS"))
+    assert.is_nil(Core.SubtitleRole("", "enUS"))
+  end)
+
+  it("maps the windows an NPC opens to its role, a merchant who repairs to repair", function()
+    assert.are.equal("vendor", Core.InteractionRole("merchant", false))
+    assert.are.equal("repair", Core.InteractionRole("merchant", true))
+    assert.are.equal("flight", Core.InteractionRole("taxi"))
+    assert.are.equal("innkeeper", Core.InteractionRole("binder"))
+    assert.are.equal("stable", Core.InteractionRole("stable"))
+    assert.is_nil(Core.InteractionRole("mailbox"))
+    assert.is_nil(Core.InteractionRole(nil))
+  end)
+
+  it("learns a role by creature ID, only upgrading it", function()
+    local roles = {}
+    assert.is_true(Core.LearnRole(roles, 352, "vendor"))
+    assert.are.equal("vendor", roles[352])
+    assert.is_false(Core.LearnRole(roles, 352, "vendor"))
+    assert.is_true(Core.LearnRole(roles, 352, "repair"))
+    assert.is_false(Core.LearnRole(roles, 352, "vendor"))
+    assert.are.equal("repair", roles[352])
+    assert.is_false(Core.LearnRole(roles, nil, "vendor"))
+    assert.is_false(Core.LearnRole(roles, 1.5, "vendor"))
+    assert.is_false(Core.LearnRole(roles, 7, "bogus"))
+    assert.is_false(Core.LearnRole(nil, 7, "vendor"))
+  end)
+
+  it("cleans the saved roles", function()
+    local roles = Core.CleanRoles({ [352] = "flight", [7] = "bogus", x = "vendor", [-1] = "vendor", [2.5] = "vendor" })
+    assert.are.same({ [352] = "flight" }, roles)
+    assert.are.same({}, Core.CleanRoles("junk"))
+  end)
+
+  it("reads the subtitle from the tooltip's second line, never a secret or an error", function()
+    assert.are.equal("Gryphon Master", Core.TooltipSubtitle(npcAPI("Gryphon Master"), "nameplate5"))
+    assert.is_nil(Core.TooltipSubtitle(npcAPI(nil), "nameplate5"))
+    assert.is_nil(Core.TooltipSubtitle(npcAPI("x", "enUS", { GetTooltipUnit = false }), "nameplate5"))
+    assert.is_nil(Core.TooltipSubtitle(npcAPI("x", "enUS", { GetTooltipUnit = function() error("boom") end }),
+      "nameplate5"))
+    assert.is_nil(Core.TooltipSubtitle(npcAPI("x", "enUS", { GetTooltipUnit = function() return {} end }),
+      "nameplate5"))
+    local secret = npcAPI(SECRET, "enUS", { issecretvalue = function(v) return v == SECRET end })
+    assert.is_nil(Core.TooltipSubtitle(secret, "nameplate5"))
+  end)
+
+  it("takes the better of the learned role and the subtitle's, and says which", function()
+    assert.are.same({ "flight", "subtitle" }, { Core.ServiceLookup(npcAPI("Gryphon Master"), "nameplate5", {}) })
+    assert.are.same({ "repair", "learned" },
+      { Core.ServiceLookup(npcAPI("General Goods"), "nameplate5", { [352] = "repair" }) })
+    assert.are.same({ "innkeeper", "subtitle" },
+      { Core.ServiceLookup(npcAPI("Innkeeper"), "nameplate5", { [352] = "vendor" }) })
+    -- A German client has no subtitle words: only the learned roles count.
+    assert.are.same({ "banker", "learned" },
+      { Core.ServiceLookup(npcAPI("Bankier", "deDE"), "nameplate5", { [352] = "banker" }) })
+    assert.are.same({ nil, "none" }, { Core.ServiceLookup(npcAPI("Bankier", "deDE"), "nameplate5", {}) })
+    -- A secret GUID or subtitle: nothing learned or read.
+    local secret = npcAPI(SECRET, "enUS", {
+      issecretvalue = function(v) return v == SECRET end,
+      UnitGUID = function() return SECRET end,
+    })
+    assert.are.same({ nil, "none" }, { Core.ServiceLookup(secret, "nameplate5", { [352] = "flight" }) })
+    assert.are.same({ nil, "none" }, { Core.ServiceLookup(nil, "nameplate5", {}) })
+  end)
+
+  it("asks for the role of friendly NPCs only, with the setting on", function()
+    local info = Core.UnitInfo(npcAPI("Gryphon Master"), "nameplate5", ON)
+    assert.are.equal("flight", info.service)
+    assert.are.equal("subtitle", info.serviceSource)
+    assert.is_nil(Core.UnitInfo(npcAPI("Gryphon Master"), "nameplate5", { services = false }).service)
+    local players = npcAPI("Gryphon Master", "enUS", { UnitIsPlayer = function() return true end })
+    assert.is_nil(Core.UnitInfo(players, "nameplate5", ON).service)
+    local enemy = npcAPI("Gryphon Master", "enUS", { UnitCanAttack = function() return true end })
+    assert.is_nil(Core.UnitInfo(enemy, "nameplate5", ON).service)
+    local unknown = npcAPI("Gryphon Master", "enUS", { UnitIsFriend = false })
+    assert.is_nil(Core.UnitInfo(unknown, "nameplate5", ON).service)
+  end)
+
+  it("gives a friendly NPC with a role the service mode, before any other", function()
+    local info = Core.UnitInfo(npcAPI("Gryphon Master"), "nameplate5", ON)
+    assert.are.same({ "service" }, { Core.PlateMode(info, ON) })
+    assert.is_true(Core.ServiceNPC(info, ON))
+    assert.are.equal("default", Core.PlateMode(info, { enabled = false, services = true }))
+    assert.are.equal("default", Core.PlateMode(info, { enabled = true, services = false }))
+    assert.is_false(Core.ServiceNPC({ player = false, friend = true, attackable = false, service = "nope" }, ON))
+    assert.is_false(Core.ServiceNPC({ player = false, friend = true, service = "flight" }, ON))
+    -- A friendly NPC without a role stays Blizzard's.
+    local plain = Core.UnitInfo(npcAPI("Level 12"), "nameplate5", ON)
+    assert.are.equal("default", Core.PlateMode(plain, ON))
+  end)
+
+  it("defaults the service settings and keeps the saved ones", function()
+    local db = Core.InitDB({})
+    assert.is_true(db.services)
+    assert.is_true(db.servicecompact)
+    assert.are.equal(3, db.serviceiconsize)
+    assert.are.same({}, db.npcroles)
+    db = Core.InitDB({ services = false, servicecompact = false, serviceiconsize = 5, npcroles = { [9] = "flight" } })
+    assert.is_false(db.services)
+    assert.is_false(db.servicecompact)
+    assert.are.equal(5, db.serviceiconsize)
+    assert.are.same({ [9] = "flight" }, db.npcroles)
+    assert.are.equal(3, Core.InitDB({ serviceiconsize = 6 }).serviceiconsize)
+  end)
+end)
+
 describe("Core.BarOffsets", function()
   it("widens the bar about its centre and keeps its bottom", function()
     -- 200 wide, factor 2: 200 more, 100 per side; offsets in the doubled bar's units.

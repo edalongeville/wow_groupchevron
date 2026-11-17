@@ -16,6 +16,12 @@
 -- A hostile (attackable) unit tied to one of the player's active quests (C_QuestLog.UnitIsRelatedToActiveQuest:
 -- kill, item drop, ...) gets its name in the hostile colour (default #FFFF00) and a single "V"
 -- chevron above it, in that colour; the rest of its plate is left as Blizzard draws it.
+-- With services on (default), a friendly NPC with a role (flight master, innkeeper, banker,
+-- auctioneer, stable master, trainer, repairer, vendor) gets the role's icon above its name, and
+-- with servicecompact on (default) its plate shows the name only. The role comes from the windows
+-- the NPC opened for you (learned by creature ID, kept in GroupChevronDB.npcroles) and, on enUS and
+-- frFR clients, from its subtitle ("<Gryphon Master>"). Friendly NPC plates are a game setting
+-- (/gchev npcplates on|off sets it; the addon never changes it by itself).
 --
 -- Robustness rules (fully independent of any other addon):
 --   * Every event handler, hook and slash command runs through SafeCall (pcall): an error
@@ -92,6 +98,8 @@ local lastNameField -- the field name found on the last marked plate ("" = none 
 -- has its own frame and the other one is hidden.
 local chevrons = setmetatable({}, { __mode = "k" })
 local singles = setmetatable({}, { __mode = "k" })
+-- icons: UnitFrame -> the service NPC role icon frame (its child, created once, lazily).
+local icons = setmetatable({}, { __mode = "k" })
 -- marks: UnitFrame -> { fs = name FontString or nil, orig = Blizzard's { r, g, b, a } or nil,
 -- applied = our last { r, g, b } } while its plate is marked.
 local marks = setmetatable({}, { __mode = "k" })
@@ -223,6 +231,11 @@ local unitAPI = {
   UnitClass = UnitClass,
   GetClassColor = Field(C_ClassColor, "GetClassColor"),
   RAID_CLASS_COLORS = type(RAID_CLASS_COLORS) == "table" and RAID_CLASS_COLORS or nil,
+  -- Service NPCs: C_TooltipInfo.GetUnit(unit) (the subtitle is its second line) and GetLocale
+  -- (which subtitle words apply); unverified on the Forever client, missing = only the roles
+  -- learned from the windows NPCs open count.
+  GetTooltipUnit = Field(C_TooltipInfo, "GetUnit"),
+  GetLocale = GetLocale,
   issecretvalue = issecretvalue,
 }
 
@@ -272,6 +285,7 @@ end
 -- FLAG_DEFAULTS are the saved on/off settings (besides enabled and compact) and their default.
 local FLAG_DEFAULTS = {
   friendchevron = true, bnetfriends = true, guildchevron = true, classcolor = Core.DEFAULT_CLASSCOLOR, showlevel = true,
+  services = true, servicecompact = true,
 }
 
 -- Flag returns a saved boolean setting of FLAG_DEFAULTS (its default when missing or invalid).
@@ -553,6 +567,65 @@ local function HideChevrons(plate, keep)
     if frame and frame ~= keep then
       frame:Hide()
     end
+  end
+end
+
+-- ---------------------------------------------------------------------------------------
+-- Service NPC role icon: one texture in its own frame, a child of the plate's UnitFrame (it fades
+-- and hides with the plate), ICON_SIZE x ICON_SIZE UI units at serviceiconsize 1.
+
+local ICON_SIZE = 6
+
+-- GetIcon returns the plate's role icon frame, creating it on first use (nil without CreateFrame).
+local function GetIcon(plate, uf)
+  local frame = icons[plate]
+  if frame then
+    return frame
+  end
+  if type(CreateFrame) ~= "function" then
+    return nil
+  end
+  frame = CreateFrame("Frame", nil, uf)
+  frame.tex = frame:CreateTexture(nil, "OVERLAY")
+  Method(frame.tex, "SetAllPoints", frame)
+  frame:Hide()
+  icons[plate] = frame
+  return frame
+end
+
+-- ShowIcon shows role's icon on the plate, its bottom GAP above anchor (else above uf). It returns
+-- false (and hides the icon) when the role has no icon or the client cannot load its texture.
+local function ShowIcon(plate, uf, anchor, role)
+  local path = Core.RoleIcon(role)
+  local frame = path and GetIcon(plate, uf)
+  if not frame then
+    return false
+  end
+  if frame.path ~= path then
+    local ok, loaded = pcall(frame.tex.SetTexture, frame.tex, path)
+    if not ok or loaded == false then
+      frame.path = nil
+      frame:Hide()
+      NoticeOnce("noicon", "service NPC icon texture not found (" .. path .. "): no icon is shown")
+      return false
+    end
+    frame.path = path
+  end
+  local size = ICON_SIZE * Factor("serviceiconsize")
+  frame:SetSize(size, size)
+  frame:ClearAllPoints()
+  frame:SetPoint("BOTTOM", anchor or uf, "TOP", 0, GAP)
+  frame.role = role
+  frame:Show()
+  return true
+end
+
+-- HideIcon hides the plate's role icon.
+local function HideIcon(plate)
+  local frame = icons[plate]
+  if frame then
+    frame.role = nil
+    frame:Hide()
   end
 end
 
@@ -1017,6 +1090,15 @@ local function HostileStyle()
   }
 end
 
+-- ServiceStyle is the look of a friendly NPC with a role: its name in Blizzard's colour
+-- (keepcolor), at size 1 and without a gap, and the role's icon above it (serviceiconsize).
+local function ServiceStyle(role, compact)
+  return {
+    kind = compact and "servicecompact" or "service", keepcolor = true, chevron = false, icon = role,
+    size = Core.DEFAULT_FACTOR, scales = false, gap = Core.NO_GAP,
+  }
+end
+
 -- RelationStyle returns the style of a friend or guildmate plate.
 local function RelationStyle(relation, compact, level)
   if relation == "guild" then
@@ -1042,7 +1124,20 @@ local function Mark(plate, uf, style)
   end
   m.kind = style.kind
   local r, g, b = style.r, style.g, style.b
-  if fs then
+  if fs and style.keepcolor then
+    -- The name keeps Blizzard's colour (service NPCs): a colour we applied for an earlier style is
+    -- given back first, and our own name is drawn in Blizzard's colour.
+    local cur = ReadColor(fs)
+    local mine = m.applied and cur and SameColor(cur[1], cur[2], cur[3], m.applied[1], m.applied[2], m.applied[3])
+    if mine and m.orig then
+      ApplyColor(fs, m.orig[1], m.orig[2], m.orig[3])
+      cur = m.orig
+    end
+    m.applied = nil
+    if cur then
+      r, g, b = cur[1], cur[2], cur[3]
+    end
+  elseif fs then
     -- The colour to restore later is Blizzard's: a colour that is still the one we applied
     -- last is ours, not Blizzard's.
     local cur = ReadColor(fs)
@@ -1052,14 +1147,17 @@ local function Mark(plate, uf, style)
     end
     m.applied = { r, g, b }
     ApplyColor(fs, r, g, b)
-  elseif style.chevron then
+  elseif style.chevron or style.icon then
     NoticeOnce("noname", "name text not found on the nameplate (tried UnitFrame.name, .Name, .unitName): "
       .. "only the chevron is shown")
   end
   local anchor = fs
-  if fs then
+  if fs and type(r) == "number" then
     local lift = style.scales and BuffLift(plate, uf) or 0
     anchor = ShowFullName(plate, uf, fs, style.size, r, g, b, lift, style.gap, style.level) or fs
+  elseif fs then
+    -- Blizzard's colour cannot be read: Blizzard's name stays as it is.
+    HideFullName(plate)
   end
   local chevron = style.chevron and GetChevron(plate, uf, style.single) or nil
   if chevron then
@@ -1076,6 +1174,10 @@ local function Mark(plate, uf, style)
   end
   -- A pooled UnitFrame may carry the other shape from its previous plate.
   HideChevrons(plate, chevron)
+  -- The service NPCs' role icon, above the name like a chevron (never both).
+  if not (style.icon and ShowIcon(plate, uf, anchor, style.icon)) then
+    HideIcon(plate)
+  end
   if style.scales then
     ScaleBar(plate, uf, BarPart(uf), Factor("barsize"))
     ScalePart(plate, AuraPart(uf), Factor("buffsize"))
@@ -1091,6 +1193,7 @@ end
 -- will colour), the colour is left alone.
 local function Unmark(plate, restore)
   HideChevrons(plate, nil)
+  HideIcon(plate)
   HideFullName(plate)
   if marks[plate] then
     RestoreScales(plate)
@@ -1242,7 +1345,7 @@ local function CompactParts(plate, uf, showHealth)
   if chain[#chain] ~= uf then
     return nil
   end
-  for _, cache in ipairs({ chevrons, singles }) do
+  for _, cache in ipairs({ chevrons, singles, icons }) do
     if cache[plate] then
       keep[cache[plate]] = true
     end
@@ -1325,8 +1428,9 @@ end
 -- A friend's plate is marked (Mark, friend colour and chevron) before it is compacted: its name
 -- is then already ours, and stays so (the plate keeps the friend look) when compact cannot
 -- apply. level is the level shown after the name of an unmarked plate (see Level), or nil; on
--- any compact plate, FollowBar then drops the suffix while the health bar is shown.
-local function Compact(plate, uf, unit, level)
+-- any compact plate, FollowBar then drops the suffix while the health bar is shown. bar is the
+-- health bar's size (default otherbarsize, the friendlies'; service NPCs keep Blizzard's).
+local function Compact(plate, uf, unit, level, bar)
   local curve, alpha = HealthAlpha(unit)
   local hurt = not curve and Core.HealthMissing(unitAPI, unit)
   local marked = marks[plate] ~= nil
@@ -1350,7 +1454,7 @@ local function Compact(plate, uf, unit, level)
     end
     return
   end
-  ScaleBar(plate, uf, BarPart(uf), Factor("otherbarsize"))
+  ScaleBar(plate, uf, BarPart(uf), bar or Factor("otherbarsize"))
   local rec = hidden[plate]
   if not rec then
     rec = { set = {}, list = {}, drive = {} }
@@ -1483,6 +1587,16 @@ local function Apply(uf, unit, restore)
     -- A hostile unit tied to a quest: full plate, our name and single chevron in the hostile colour.
     Uncompact(uf)
     Mark(uf, uf, HostileStyle())
+  elseif mode == "service" then
+    -- A friendly NPC with a role: the role icon above its name; name only with servicecompact,
+    -- except on the target (its full plate, like the friendly players').
+    local compact = Flag("servicecompact") and info.target == false
+    Mark(uf, uf, ServiceStyle(info.service, compact))
+    if compact then
+      Compact(uf, uf, unit, nil, Core.DEFAULT_FACTOR)
+    else
+      Uncompact(uf)
+    end
   elseif mode == "friend" then
     -- Full plates never get the level: Blizzard's health bar shows it.
     Uncompact(uf)
@@ -1745,6 +1859,7 @@ local FACTOR_KINDS = {
   chevsize = true, textsize = true, othersize = true, barsize = true, buffsize = true, otherbarsize = true,
   hostilechevsize = true, hostilesize = true, friendchevsize = true, guildchevsize = true,
   memberoutlinesize = true, friendoutlinesize = true, guildoutlinesize = true, hostileoutlinesize = true,
+  serviceiconsize = true,
 }
 
 -- SetFactor sets one of FACTOR_KINDS from a number (the panel's slider) or a
@@ -1825,9 +1940,11 @@ local function ResetAll()
   db.hostilecolor = Core.CopyDefaultHostileColor()
   db.classcolor = Core.DEFAULT_CLASSCOLOR
   db.showlevel = true
+  db.services = true
+  db.servicecompact = true
   for _, key in ipairs({ "chevsize", "textsize", "othersize", "barsize", "buffsize", "otherbarsize",
     "hostilechevsize", "hostilesize", "friendchevsize", "guildchevsize", "memberoutlinesize",
-    "friendoutlinesize", "guildoutlinesize", "hostileoutlinesize" }) do
+    "friendoutlinesize", "guildoutlinesize", "hostileoutlinesize", "serviceiconsize" }) do
     db[key] = Core.DefaultFactor(key)
   end
   for _, key in ipairs({ "namegap", "othernamegap", "hostilenamegap" }) do
@@ -1837,6 +1954,64 @@ local function ResetAll()
   Changed()
   return true
 end
+
+-- Friendly NPC nameplates: a game setting (the CVar below, unverified on the Forever client). The
+-- service NPC icons need it on, but the addon only changes it when asked (/gchev npcplates, the
+-- options panel), never by itself; it is not saved in GroupChevronDB.
+local NPC_PLATES_CVAR = "nameplateShowFriendlyNPCs"
+
+-- NpcPlates returns true or false for the friendly NPC nameplates setting, or nil when the client
+-- does not have it (or it cannot be read).
+local function NpcPlates()
+  local value
+  if type(C_CVar) == "table" then
+    value = Try(C_CVar.GetCVar, NPC_PLATES_CVAR)
+  end
+  if value == nil then
+    value = Try(GetCVar, NPC_PLATES_CVAR)
+  end
+  if value == "1" then
+    return true
+  elseif value == "0" then
+    return false
+  end
+  return nil
+end
+
+-- SetNpcPlates turns the friendly NPC nameplates on or off (true/false or "on"/"off"). It returns
+-- true, or false and why: "invalid", "combat" (the game refuses it in combat), "missing" (no such
+-- setting on this client) or "failed" (the client refused the change).
+local function SetNpcPlates(value)
+  if type(value) == "string" then
+    value = Core.ParseOnOff(value)
+  end
+  if type(value) ~= "boolean" then
+    return false, "invalid"
+  end
+  if Try(InCombatLockdown) == true then
+    return false, "combat"
+  end
+  if NpcPlates() == nil then
+    return false, "missing"
+  end
+  local set = Field(C_CVar, "SetCVar")
+  if type(set) ~= "function" then
+    set = SetCVar
+  end
+  if type(set) ~= "function" or not pcall(set, NPC_PLATES_CVAR, value and "1" or "0") or NpcPlates() ~= value then
+    return false, "failed"
+  end
+  Changed()
+  return true
+end
+
+-- NPC_PLATES_REFUSED are the messages of SetNpcPlates's refusals.
+local NPC_PLATES_REFUSED = {
+  invalid = "use /gchev npcplates on or /gchev npcplates off",
+  combat = "the game does not allow it in combat: try again out of combat",
+  missing = "this client has no friendly NPC nameplates setting (" .. NPC_PLATES_CVAR .. ")",
+  failed = "the client refused the change",
+}
 
 -- ---------------------------------------------------------------------------------------
 -- Options panel (Options -> AddOns -> GroupChevron). Plain widgets on our own canvas, shown
@@ -1873,7 +2048,7 @@ local function BuildPanel()
   scroll:SetPoint("TOPLEFT", panel, "TOPLEFT", 0, -4)
   scroll:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -28, 4)
   local content = CreateFrame("Frame", nil, scroll)
-  content:SetSize(600, 1040)
+  content:SetSize(600, 1440)
   scroll:SetScrollChild(content)
 
   local function Label(text, x, y, template)
@@ -2083,7 +2258,7 @@ local function BuildPanel()
 
   local reset = CreateFrame("Button", nil, content, "UIPanelButtonTemplate")
   reset:SetSize(160, 24)
-  reset:SetPoint("TOPLEFT", content, "TOPLEFT", 16, -1238)
+  reset:SetPoint("TOPLEFT", content, "TOPLEFT", 16, -1404)
   reset:SetText(L("reset"))
   reset:SetScript("OnClick", function()
     SafeCall("options reset", ResetAll)
@@ -2252,6 +2427,23 @@ local function BuildPanel()
     end)
   end
 
+  -- Service NPCs (friendly NPCs with a role): role icons, name only, the game's friendly NPC
+  -- nameplates setting and the icon size. Created last: the specs find widgets by creation order.
+  local SERVICE_Y = -1238
+  Group(L("services"), SERVICE_Y, 150)
+  local servicesBox = Checkbox(L("show_icons"), SERVICE_Y - 32, function(v) SetFlag("services", v) end)
+  local serviceCompactBox = Checkbox(L("compact"), SERVICE_Y - 32, function(v) SetFlag("servicecompact", v) end, 260)
+  local npcPlatesBox = Checkbox(L("npc_plates"), SERVICE_Y - 72, function(v)
+    local ok, why = SetNpcPlates(v)
+    if not ok then
+      Print("friendly NPC nameplates not changed: " .. (NPC_PLATES_REFUSED[why] or tostring(why)))
+      if RefreshPanel then
+        RefreshPanel()
+      end
+    end
+  end)
+  sliders[#sliders + 1] = { "serviceiconsize", Slider(L("icon_size"), SERVICE_Y - 112, "serviceiconsize") }
+
   -- Reads the saved settings into the controls.
   RefreshPanel = function()
     refreshing = true
@@ -2271,6 +2463,9 @@ local function BuildPanel()
       end
       classBox:SetChecked(Flag("classcolor"))
       levelBox:SetChecked(Flag("showlevel"))
+      servicesBox:SetChecked(Flag("services"))
+      serviceCompactBox:SetChecked(Flag("servicecompact"))
+      npcPlatesBox:SetChecked(NpcPlates() == true)
       for _, sl in ipairs(sliders) do
         local v = Core.GAP_KINDS[sl[1]] and Gap(sl[1]) or Factor(sl[1])
         sl[2]:SetValue(v)
@@ -2382,6 +2577,12 @@ function handlers.PLAYER_ENTERING_WORLD()
   if FriendlyPlatesOff() then
     NoticeOnce("friendsoff", "friendly player nameplates are off (V / Shift+V): group members cannot be marked")
   end
+  -- Said once per install (the setting is the player's): the service NPC icons need NPC plates.
+  if type(db) == "table" and Flag("services") and NpcPlates() == false and not db.npcplatesnoticed then
+    db.npcplatesnoticed = true
+    Print("service NPC icons (flight masters, vendors...) need friendly NPC nameplates, which are off: "
+      .. "/gchev npcplates on (or /gchev services off to hide this feature)")
+  end
   RefreshAll()
 end
 
@@ -2443,8 +2644,11 @@ local function OnHealth(unit)
     return
   end
   local info = Info(unit)
-  if Core.PlateMode(info, ModeSettings()) == "compact" then
+  local mode = Core.PlateMode(info, ModeSettings())
+  if mode == "compact" then
     Compact(uf, uf, unit, Level(unit, info))
+  elseif mode == "service" and Flag("servicecompact") and info.target == false and marks[uf] then
+    Compact(uf, uf, unit, nil, Core.DEFAULT_FACTOR)
   end
 end
 
@@ -2504,6 +2708,51 @@ end
 -- pcall RegisterEvent below.
 for _, event in ipairs({ "QUEST_LOG_UPDATE", "UNIT_QUEST_LOG_CHANGED", "QUEST_ACCEPTED", "QUEST_REMOVED" }) do
   handlers[event] = ScheduleFriendRefresh
+end
+
+-- Service NPCs: the windows an NPC opens tell its role for sure (a merchant who repairs, a flight
+-- master...). The role is learned by creature ID (the "npc" unit's GUID, readable during the
+-- interaction) into GroupChevronDB.npcroles, only while the feature is on, and the plates are
+-- re-checked (same coalesced refresh). Both the classic events and the interaction manager's are
+-- listened to (whichever the client has; an unknown event just fails its pcall RegisterEvent).
+local function LearnFromNPC(kind)
+  if type(db) ~= "table" or not Enabled() or not Flag("services") then
+    return
+  end
+  local id = Core.NpcID(Try(UnitGUID, "npc"))
+  local canRepair = kind == "merchant" and Try(CanMerchantRepair) == true
+  if Core.LearnRole(db.npcroles, id, Core.InteractionRole(kind, canRepair)) then
+    ScheduleFriendRefresh()
+  end
+end
+
+for event, kind in pairs({ MERCHANT_SHOW = "merchant", TAXIMAP_OPENED = "taxi", BANKFRAME_OPENED = "banker",
+  AUCTION_HOUSE_SHOW = "auctioneer", TRAINER_SHOW = "trainer", PET_STABLE_SHOW = "stable",
+  CONFIRM_BINDER = "binder" }) do
+  handlers[event] = function()
+    LearnFromNPC(kind)
+  end
+end
+
+-- INTERACTION_TYPES: the names in Enum.PlayerInteractionType of the windows above.
+local INTERACTION_TYPES = {
+  Merchant = "merchant", TaxiNode = "taxi", Banker = "banker", Auctioneer = "auctioneer", Trainer = "trainer",
+  StableMaster = "stable", Binder = "binder",
+}
+
+function handlers.PLAYER_INTERACTION_MANAGER_FRAME_SHOW(interaction)
+  interaction = Readable(interaction)
+  local types = Field(_G.Enum, "PlayerInteractionType")
+  if interaction == nil or type(types) ~= "table" then
+    return
+  end
+  for name, kind in pairs(INTERACTION_TYPES) do
+    local v = Field(types, name)
+    if v ~= nil and v == interaction then
+      LearnFromNPC(kind)
+      return
+    end
+  end
 end
 
 function handlers.NAME_PLATE_UNIT_REMOVED(unit)
@@ -2584,6 +2833,23 @@ local function QuestText(unit, what)
     QUEST_SOURCE_NAMES[info.questSource] or tostring(info.questSource), tostring(info.attackable))
 end
 
+-- SERVICE_SOURCE_NAMES are the sources of Core.ServiceLookup, as /gchev prints them.
+local SERVICE_SOURCE_NAMES = {
+  learned = "learned from its window",
+  subtitle = "subtitle",
+  none = "none",
+}
+
+-- ServiceText says whether unit counts as a service NPC, its role and where the role comes from,
+-- e.g. "target service NPC: yes, flight (subtitle)".
+local function ServiceText(unit, what)
+  local info = Info(unit)
+  local yes = Core.ServiceNPC(info, ModeSettings())
+  return string.format("%s service NPC: %s, %s (%s; subtitle %q)", what, yes and "yes" or "no",
+    tostring(info.service or "no role"), SERVICE_SOURCE_NAMES[info.serviceSource] or "not asked",
+    tostring(Core.TooltipSubtitle(unitAPI, unit) or ""))
+end
+
 -- ClassText gives unit's class token and class colour, and the colour its name gets, e.g.
 -- "class MAGE, class colour #3FC7EB (classcolor on), name colour: class #3FC7EB".
 local function ClassText(unit)
@@ -2617,12 +2883,14 @@ local function SlashStatus()
   elseif lastNameField then
     field = "UnitFrame." .. lastNameField
   end
-  local n, friends, guildmates, classes, quests = 0, 0, 0, 0, 0
+  local n, friends, guildmates, classes, quests, services = 0, 0, 0, 0, 0, 0
   for _, m in pairs(marks) do
     if m.kind == "member" then
       n = n + 1
     elseif m.kind == "quest" then
       quests = quests + 1
+    elseif m.kind == "service" or m.kind == "servicecompact" then
+      services = services + 1
     elseif m.kind == "guild" or m.kind == "guildcompact" then
       guildmates = guildmates + 1
     elseif m.kind == "class" or m.kind == "classcompact" then
@@ -2648,6 +2916,15 @@ local function SlashStatus()
   Print(string.format("hostiles (quest): colour %s, hostilechevsize %s, hostilesize %s, hostilenamegap %d, "
     .. "%d plate(s) marked; %s", Core.FormatColor(HostileColor()), tostring(Factor("hostilechevsize")),
     tostring(Factor("hostilesize")), Gap("hostilenamegap"), quests, QuestText("target", "target")))
+  local learned = 0
+  for _ in pairs(type(db.npcroles) == "table" and db.npcroles or {}) do
+    learned = learned + 1
+  end
+  local plates = NpcPlates()
+  Print(string.format("service NPCs: %s, compact %s, serviceiconsize %s, friendly NPC nameplates %s, "
+    .. "%d role(s) learned, %d plate(s) marked; %s", Flag("services") and "on" or "off",
+    Flag("servicecompact") and "on" or "off", tostring(Factor("serviceiconsize")),
+    plates == nil and "unknown" or (plates and "on" or "off"), learned, services, ServiceText("target", "target")))
   Print(string.format("name font: %s", tostring(db.font)))
   local c = 0
   for _ in pairs(hidden) do
@@ -2664,7 +2941,8 @@ local function SlashStatus()
     .. " | hostilesize 1-3 | hostilenamegap -10-40"
     .. " | memberoutlinesize|friendoutlinesize|guildoutlinesize|hostileoutlinesize 0-5"
     .. " | othersize 1-3 | otherbarsize 1-3 | othernamegap -10-40 | level on|off | compact on|off | classcolor on|off"
-    .. " | font default|outline|chat|large|game13 | reset | options | debug")
+    .. " | font default|outline|chat|large|game13"
+    .. " | services on|off | servicecompact on|off | serviceiconsize 1-5 | npcplates on|off | reset | options | debug")
 end
 
 -- PartLabel names a plate part for /gchev debug: its frame name, else the field that holds it
@@ -2793,6 +3071,7 @@ local function SlashDebug()
   Print("debug: " .. FriendText(unit, "target"))
   Print("debug: " .. GuildText(unit, "target"))
   Print("debug: " .. QuestText(unit, "target"))
+  Print("debug: " .. ServiceText(unit, "target"))
   Print("debug: " .. ClassText(unit))
   -- Blizzard's name on this plate, and whether ours covers it (enemies without a name: Blizzard's
   -- alpha 0 and "covered: no" would be a fade we failed to give back).
@@ -2971,6 +3250,19 @@ local function Slash(msg)
       return
     end
     Print("compact " .. (db.compact and "on" or "off"))
+  elseif cmd == "npcplates" then
+    if arg == "" then
+      local on = NpcPlates()
+      Print(string.format("npcplates %s (the game's friendly NPC nameplates setting)",
+        on == nil and "unknown" or (on and "on" or "off")))
+      return
+    end
+    local ok, why = SetNpcPlates(arg)
+    if not ok then
+      Print(string.format("npcplates %q: %s; nothing changed", arg, NPC_PLATES_REFUSED[why] or tostring(why)))
+      return
+    end
+    Print("npcplates " .. (NpcPlates() and "on" or "off"))
   elseif cmd == "reset" then
     ResetColor()
     Print("colour reset to " .. Core.FormatColor(Color()))

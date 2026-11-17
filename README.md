@@ -1,6 +1,6 @@
 # GroupChevron
 
-A World of Warcraft addon (Interface 16001, WoW: Forever client) that makes the members of your party or raid easy to spot in a crowd. Standalone: no dependency on any other addon, nothing recorded or uploaded.
+A World of Warcraft addon (Interface 16001, WoW: Forever client) that makes the members of your party or raid easy to spot in a crowd. Standalone: no dependency on any other addon, nothing uploaded. Besides its settings, the only thing it saves is the role of the NPCs whose windows you open (see Service NPCs below).
 
 ## Features
 
@@ -16,6 +16,7 @@ The addon is still being tested.
 - Changes the nameplate font
 - Colors names by class
 - Displays friendlies' (non-grouped players') health bars only when below 100%
+- Adds a role icon above service NPCs (flight master, innkeeper, banker, auctioneer, stable master, trainer, repairer, vendor), and shows only their name (**Service NPCs** section of the options, `/gchev services|servicecompact on|off`, `/gchev serviceiconsize 1-5`). It needs the game's friendly NPC nameplates: `/gchev npcplates on` (or the checkbox in that section) turns them on; the addon never changes that setting by itself. The role comes from the windows an NPC opens for you (learned once, then shown on every visit) and, on English and French clients, from its subtitle ("<Gryphon Master>")
 
 ## Layout
 
