@@ -1639,8 +1639,40 @@ describe("GroupChevron", function()
       env.slash("names")
       assert.is_truthy(printedContains(env, 'names: nameplate3 "?" alpha 0 shown nil, remembered faded: no'))
       assert.is_falsy(printedContains(env, "names: nameplate2")) -- covered by our own name
-      assert.is_truthy(printedContains(env, "names: 2 plate(s), 1 without a visible name; driver hooks: release on"))
+      assert.is_truthy(printedContains(env,
+        "names: 2 plate(s), 1 without a visible name, 0 marked at Blizzard's size; driver hooks: release on"))
       assert.are.equal(0, enemy.UnitFrame.name.alpha) -- only reports
+    end)
+
+    it("says why a marked member's name stays Blizzard's (not textsize), with /gchev names and debug", function()
+      local overrides = driver()
+      overrides.issecretvalue = function(v) return v == "secret" end
+      local env = load({ overrides = overrides })
+      local plate = newTreePlate("nameplate2")
+      local fs = plate.UnitFrame.name
+      fs.text = "secret" -- the client gives the name text as a secret value
+      env.world.plates.nameplate2 = plate
+      env.world.players.nameplate2, env.world.party.nameplate2 = true, true
+      env.fire("NAME_PLATE_UNIT_ADDED", "nameplate2")
+      assert.are.equal("#FF4FD8", hex(fs.color)) -- marked: our colour on Blizzard's name
+      assert.are.equal(1, fs:GetAlpha()) -- but Blizzard's name, at Blizzard's size
+      env.slash("names")
+      assert.is_truthy(printedContains(env,
+        'names: nameplate2 "?" marked, our own name not drawn: name text unreadable (secret or empty)'))
+      assert.is_truthy(printedContains(env, "names: 1 plate(s), 0 without a visible name, 1 marked at Blizzard's size"))
+      env.world.target, env.world.plates.target = "nameplate2", plate
+      env.slash("debug")
+      assert.is_truthy(printedContains(env,
+        "debug: marked, but our own name is not drawn: name text unreadable (secret or empty) (text secret)"))
+
+      -- Readable again: our own name is drawn and nothing is reported.
+      fs.text = "Farbatosz Marokbar"
+      env.fire("GROUP_ROSTER_UPDATE")
+      assert.are.equal(0, fs:GetAlpha())
+      env.slash("names")
+      local last = env.printed[#env.printed]
+      assert.is_truthy(last:find("0 without a visible name, 0 marked at Blizzard's size", 1, true), last)
+      assert.is_false(printedContains(env, "error in"))
     end)
 
     it("retries a failed restore on the next refresh and when leaving combat", function()
