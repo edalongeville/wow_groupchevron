@@ -3424,6 +3424,14 @@ local function SlashDebug()
     driverHooks.release and "on" or "off", driverHooks.releaseCalls, driverHooks.added and "on" or "off",
     driverHooks.addedCalls, restoreFailures))
   HealthDebug(type(unit) == "string" and unit or "target", uf)
+  -- Where our name is anchored (compact plates drop it onto the faded health bar, Core.NameDrops).
+  local lrec, hrec = labels[uf], hidden[uf]
+  local known = Core.KnownHurt(unitAPI, type(unit) == "string" and unit or "target")
+  Print(string.format("debug: our name %s; compact %s, curve %s, health known hurt %s, bar part %s",
+    not (lrec and lrec.name) and "not drawn"
+      or (lrec.drop and "dropped onto the health bar" or "above the bar (Blizzard's place)"),
+    hrec and "yes" or "no", hrec and tostring(hrec.curve) or "-", tostring(known),
+    BarPart(uf) and PartLabel(BarPart(uf), { uf }) or "none"))
   -- The target itself is never compact, so also list what compact mode would hide on it:
   -- that is how the plate's parts on this client can be checked in game.
   local rec = hidden[uf]
