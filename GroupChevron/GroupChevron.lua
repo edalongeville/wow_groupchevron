@@ -2115,6 +2115,75 @@ local NPC_PLATES_REFUSED = {
   failed = "the client refused the change",
 }
 
+-- SoftInteract is the game's interaction soft target (CVar SoftTargetInteract, 0 to 3; 0 = off):
+-- with a gamepad the NPC right in front of the player becomes its interaction target, and the game
+-- shows that NPC's plate at the target's size, so friendly NPC names jump between two sizes as the
+-- player moves. Like the friendly NPC plates, a game setting the addon only changes when asked
+-- (/gchev softinteract, the NPCs page), not saved in GroupChevronDB. One table, not top-level
+-- locals: the main chunk is close to Lua 5.1's limit of 200 locals.
+local SoftInteract = { cvar = "SoftTargetInteract", default = "3" }
+
+-- SoftInteract.Get returns true (on: any value but "0"), false ("0") or nil (no such setting, or
+-- unreadable), and the raw value.
+function SoftInteract.Get()
+  local value
+  if type(C_CVar) == "table" then
+    value = Try(C_CVar.GetCVar, SoftInteract.cvar)
+  end
+  if value == nil then
+    value = Try(GetCVar, SoftInteract.cvar)
+  end
+  if type(value) ~= "string" or value == "" then
+    return nil
+  end
+  return value ~= "0", value
+end
+
+-- SoftInteract.Set turns the interaction soft target on or off (true/false or "on"/"off"). Off
+-- writes "0" and remembers the value it had (for this session); on writes that value back, else
+-- the game's default "3". It returns true, or false and why (as SetNpcPlates: "invalid",
+-- "combat", "missing" or "failed").
+function SoftInteract.Set(value)
+  if type(value) == "string" then
+    value = Core.ParseOnOff(value)
+  end
+  if type(value) ~= "boolean" then
+    return false, "invalid"
+  end
+  if Try(InCombatLockdown) == true then
+    return false, "combat"
+  end
+  local on, raw = SoftInteract.Get()
+  if on == nil then
+    return false, "missing"
+  end
+  if on == value then
+    return true
+  end
+  if on then
+    SoftInteract.last = raw
+  end
+  local set = Field(C_CVar, "SetCVar")
+  if type(set) ~= "function" then
+    set = SetCVar
+  end
+  local target = value and (SoftInteract.last or SoftInteract.default) or "0"
+  if type(set) ~= "function" or not pcall(set, SoftInteract.cvar, target) or SoftInteract.Get() ~= value then
+    return false, "failed"
+  end
+  return true
+end
+
+-- SoftInteract.Refused gives the message of a Set refusal.
+function SoftInteract.Refused(why)
+  if why == "invalid" then
+    return "use /gchev softinteract on or /gchev softinteract off"
+  elseif why == "missing" then
+    return "this client has no interaction soft target setting (" .. SoftInteract.cvar .. ")"
+  end
+  return NPC_PLATES_REFUSED[why] or tostring(why)
+end
+
 -- ---------------------------------------------------------------------------------------
 -- Options panel (Options -> AddOns -> GroupChevron). Plain widgets on our own canvas, shown
 -- only when the client has the Settings canvas API; otherwise the slash commands are all there
@@ -2178,10 +2247,21 @@ local function BuildPanel()
     return fs
   end
 
+  -- The category's title carries the addon's version (the .toc's "## Version", read with
+  -- C_AddOns.GetAddOnMetadata, else the older global GetAddOnMetadata; none: the name alone).
+  local rootTitle = "GroupChevron"
+  local getMeta = Field(C_AddOns, "GetAddOnMetadata")
+  if type(getMeta) ~= "function" then
+    getMeta = GetAddOnMetadata
+  end
+  local version = type(getMeta) == "function" and Try(getMeta, "GroupChevron", "Version") or nil
+  if type(version) == "string" and version ~= "" then
+    rootTitle = rootTitle .. " " .. version
+  end
   -- Page titles: "GroupChevron" on the category, "GroupChevron - <page>" on each sub-category.
   for _, key in ipairs({ "root", "main", "players", "quests", "npcs" }) do
     content = pages[key].content
-    Label(key == "root" and "GroupChevron" or ("GroupChevron - " .. pages[key].title), 16, -16, "GameFontNormalLarge")
+    Label(key == "root" and rootTitle or ("GroupChevron - " .. pages[key].title), 16, -16, "GameFontNormalLarge")
   end
   content = pages.root.content
   Label(L("choose_section"), 16, -52)
@@ -2595,6 +2675,18 @@ local function BuildPanel()
   content = pages.players.content
   sliders[#sliders + 1] = { "friendsize", Slider(L("text_size"), -530, "friendsize") }
   sliders[#sliders + 1] = { "guildsize", Slider(L("text_size"), -762, "guildsize") }
+  -- The game's interaction soft target (gamepad), beside the friendly NPC plates setting on the
+  -- NPCs page (created last: the specs find widgets by creation order).
+  content = pages.npcs.content
+  local softInteractBox = Checkbox(L("soft_interact"), NPC_Y - 32, function(v)
+    local ok, why = SoftInteract.Set(v)
+    if not ok then
+      Print("interaction soft target not changed: " .. SoftInteract.Refused(why))
+      if RefreshPanel then
+        RefreshPanel()
+      end
+    end
+  end, 260)
 
   -- Reads the saved settings into the controls.
   RefreshPanel = function()
@@ -2618,6 +2710,7 @@ local function BuildPanel()
       servicesBox:SetChecked(Flag("npcicons"))
       serviceCompactBox:SetChecked(Flag("npccompact"))
       npcPlatesBox:SetChecked(NpcPlates() == true)
+      softInteractBox:SetChecked(SoftInteract.Get() == true)
       for _, sl in ipairs(sliders) do
         local v = Core.GAP_KINDS[sl[1]] and Gap(sl[1]) or Factor(sl[1])
         sl[2]:SetValue(v)
@@ -3102,11 +3195,13 @@ local function SlashStatus()
   end
   local plates = NpcPlates()
   Print(string.format("friendly NPCs: icons %s, compact %s, npcsize %s, npcnamegap %d, npciconsize %s, "
-    .. "friendly NPC nameplates %s, %d role(s) learned, %d shipped, %d plate(s) marked; %s",
+    .. "friendly NPC nameplates %s, interaction soft target %s, %d role(s) learned, %d shipped, %d plate(s) "
+    .. "marked; %s",
     Flag("npcicons") and "on" or "off",
     Flag("npccompact") and "on" or "off", tostring(Factor("npcsize")), Gap("npcnamegap"),
     tostring(Factor("npciconsize")),
-    plates == nil and "unknown" or (plates and "on" or "off"), learned, shipped, services,
+    plates == nil and "unknown" or (plates and "on" or "off"),
+    SoftInteract.Get() == nil and "unknown" or (SoftInteract.Get() and "on" or "off"), learned, shipped, services,
     ServiceText("target", "target")))
   Print(string.format("name font: %s", tostring(db.font)))
   local c = 0
@@ -3126,7 +3221,8 @@ local function SlashStatus()
     .. " | memberoutlinesize|friendoutlinesize|guildoutlinesize|hostileoutlinesize 0-5"
     .. " | othersize 1-3 | otherbarsize 1-3 | othernamegap -10-40 | level on|off | compact on|off | classcolor on|off"
     .. " | font default|outline|chat|large|game13"
-    .. " | npcplates on|off | npcicons on|off | npccompact on|off | npcsize 1-3 | npcnamegap -10-40 | npciconsize 1-15"
+    .. " | npcplates on|off | softinteract on|off | npcicons on|off | npccompact on|off | npcsize 1-3"
+    .. " | npcnamegap -10-40 | npciconsize 1-15"
     .. " | icon [<role> <texture or atlas>|default]"
     .. " | reset | options | debug")
 end
@@ -3513,6 +3609,19 @@ local function Slash(msg)
       return
     end
     Print("npcplates " .. (NpcPlates() and "on" or "off"))
+  elseif cmd == "softinteract" then
+    if arg == "" then
+      local on, raw = SoftInteract.Get()
+      Print(string.format("softinteract %s (the game's interaction soft target, %s %s)",
+        on == nil and "unknown" or (on and "on" or "off"), SoftInteract.cvar, tostring(raw)))
+      return
+    end
+    local ok, why = SoftInteract.Set(arg)
+    if not ok then
+      Print(string.format("softinteract %q: %s; nothing changed", arg, SoftInteract.Refused(why)))
+      return
+    end
+    Print("softinteract " .. (SoftInteract.Get() and "on" or "off"))
   elseif cmd == "reset" then
     ResetColor()
     Print("colour reset to " .. Core.FormatColor(Color()))

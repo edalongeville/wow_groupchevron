@@ -3312,11 +3312,17 @@ describe("GroupChevron", function()
             if name == "nameplateShowFriendlyNPCs" then
               return npc.cvar
             end
+            if name == "SoftTargetInteract" then
+              return npc.soft
+            end
             return name == "nameplateShowFriends" and "1" or nil
           end,
           SetCVar = function(name, v)
             if name == "nameplateShowFriendlyNPCs" and npc.cvar ~= nil and not npc.refuse then
               npc.cvar = v
+            end
+            if name == "SoftTargetInteract" and npc.soft ~= nil and not npc.refuse then
+              npc.soft = v
             end
           end,
         },
@@ -3693,6 +3699,45 @@ describe("GroupChevron", function()
       assert.is_false(printedContains(env, "error in"))
     end)
 
+    it("turns the gamepad interaction soft target off and back on only when asked", function()
+      local npc = { soft = "2" }
+      local env = load(npcClient(npc))
+      env.fire("PLAYER_ENTERING_WORLD")
+      assert.are.equal("2", npc.soft) -- never changed by itself
+      env.slash("softinteract")
+      assert.is_true(printedContains(env, "softinteract on (the game's interaction soft target, SoftTargetInteract 2)"))
+      env.slash("softinteract off")
+      assert.are.equal("0", npc.soft)
+      assert.is_true(printedContains(env, "softinteract off"))
+      -- Back on: the value it had (2), not the default.
+      env.slash("softinteract on")
+      assert.are.equal("2", npc.soft)
+      npc.combat = true
+      env.slash("softinteract off")
+      assert.are.equal("2", npc.soft)
+      assert.is_true(printedContains(env, "not allow it in combat"))
+      npc.combat = false
+      env.slash("softinteract maybe")
+      assert.is_true(printedContains(env, "use /gchev softinteract on or /gchev softinteract off"))
+      assert.are.equal("2", npc.soft)
+      npc.refuse = true
+      env.slash("softinteract off")
+      assert.is_true(printedContains(env, "refused the change"))
+      assert.is_nil(env.GroupChevronDB.softinteract) -- a game setting, not saved by the addon
+
+      -- Off at load: on gives the game's default, 3.
+      npc = { soft = "0" }
+      env = load(npcClient(npc))
+      env.slash("softinteract on")
+      assert.are.equal("3", npc.soft)
+
+      -- A client without the setting.
+      env = load(npcClient({}))
+      env.slash("softinteract off")
+      assert.is_true(printedContains(env, "no interaction soft target setting (SoftTargetInteract)"))
+      assert.is_false(printedContains(env, "error in"))
+    end)
+
     it("prints the service NPC state in /gchev and /gchev debug", function()
       local env = load(npcClient({ subtitle = "Gryphon Master", cvar = "1" }))
       local plate = newTreePlate("nameplate5")
@@ -3948,6 +3993,22 @@ describe("GroupChevron", function()
       assert.is_false(printedContains(env, "error in"))
     end)
 
+    it("shows the addon's version in the category's title", function()
+      local overrides, rec = widgetClient()
+      overrides.C_AddOns = {
+        GetAddOnMetadata = function(name, key)
+          return name == "GroupChevron" and key == "Version" and "9.8.7" or nil
+        end,
+      }
+      load({ overrides = overrides })
+      assert.are.equal("GroupChevron 9.8.7", page(rec, "GroupChevron").labels[1].text)
+      assert.are.equal("GroupChevron - Main", page(rec, "Main").labels[1].text)
+      -- Without the metadata API: the name alone.
+      overrides, rec = widgetClient()
+      load({ overrides = overrides })
+      assert.are.equal("GroupChevron", page(rec, "GroupChevron").labels[1].text)
+    end)
+
     it("orders the sections of each page from the top down", function()
       local overrides, rec = widgetClient()
       load({ overrides = overrides })
@@ -3964,13 +4025,15 @@ describe("GroupChevron", function()
       local plates = labelY(npcs, "Friendly NPC nameplates")
       local icons = labelY(npcs, "Show role icons (Beta)")
       assert.is_true(services > plates and plates > icons)
+      -- The nameplates setting shares its row with the gamepad interaction soft target only.
+      assert.are.equal(plates, labelY(npcs, "Auto-target NPCs (gamepad)"))
       local onRow = 0
       for _, l in ipairs(npcs.labels) do
         if l.points[1][5] == plates then
           onRow = onRow + 1
         end
       end
-      assert.are.equal(1, onRow)
+      assert.are.equal(2, onRow)
     end)
 
     it("draws one bordered frame per option group, without overlap on its page", function()
