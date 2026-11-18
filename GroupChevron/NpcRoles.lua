@@ -9,5 +9,14 @@ local _, ns = ...
 
 if type(ns) == "table" then
   ns.NpcRoles = {
+    [227] = "vendor",
+    [274] = "vendor",
+    [277] = "vendor",
+    [352] = "flight",
+    [2409] = "flight",
+    [2455] = "banker",
+    [3137] = "trainer",
+    [6790] = "vendor",
+    [11068] = "profession",
   }
 end
