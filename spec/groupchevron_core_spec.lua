@@ -535,6 +535,143 @@ describe("GroupChevron Core", function()
     end)
   end)
 
+  describe("hostiles tied to a party member's quest", function()
+    local TYPES = { QuestObjective = 8, QuestTitle = 17, QuestPlayer = 18 }
+    -- tooltipAPI answers GetTooltipUnit with { lines = lines } for every unit; the player is "Me".
+    local function tooltipAPI(lines, overrides)
+      local api = {
+        GetTooltipUnit = function() return { lines = lines } end,
+        TooltipLineTypes = TYPES,
+        IsInGroup = function() return true end,
+        UnitName = function(unit) return unit == "player" and "Me" or nil end,
+        issecretvalue = function(v) return v == SECRET end,
+      }
+      for k, v in pairs(overrides or {}) do
+        api[k] = v
+      end
+      return api
+    end
+    local function title(t) return { type = 17, leftText = t } end
+    local function who(name) return { type = 18, leftText = name } end
+    local function objective(text, completed) return { type = 8, leftText = text, completed = completed } end
+
+    it("defaults the party quest settings like the hostiles, in white", function()
+      local db = Core.InitDB(nil)
+      assert.are.same({ 1, 1, 1 }, db.partyquestcolor)
+      assert.are.equal(db.hostilechevsize, db.partyquestchevsize)
+      assert.are.equal(db.hostilesize, db.partyquestsize)
+      assert.are.equal(db.hostilenamegap, db.partyquestnamegap)
+      assert.are.equal(db.hostileoutlinesize, db.partyquestoutlinesize)
+      assert.are.equal(5, Core.MaxFactor("partyquestchevsize"))
+      assert.are.equal(3, Core.MaxFactor("partyquestsize"))
+      assert.is_true(Core.GAP_KINDS.partyquestnamegap)
+      db = Core.InitDB({ partyquestcolor = { 2, 0, 0 }, partyquestchevsize = 9, partyquestnamegap = 1.5 })
+      assert.are.same({ 1, 1, 1 }, db.partyquestcolor)
+      assert.are.equal(3, db.partyquestchevsize)
+      assert.are.equal(5, db.partyquestnamegap)
+    end)
+
+    it("ObjectiveOpen reads completed, else a n/m count", function()
+      local api = tooltipAPI({})
+      assert.is_true(Core.ObjectiveOpen(api, objective("Kobold slain: 3/8", false)))
+      assert.is_false(Core.ObjectiveOpen(api, objective("Kobold slain: 3/8", true)))
+      assert.is_true(Core.ObjectiveOpen(api, objective("- 3/8 Kobold slain")))
+      assert.is_true(Core.ObjectiveOpen(api, objective("0 / 1 Red Bandana")))
+      assert.is_false(Core.ObjectiveOpen(api, objective("8/8 Kobold slain")))
+      assert.is_false(Core.ObjectiveOpen(api, objective("Slay the kobolds")))
+      assert.is_false(Core.ObjectiveOpen(api, objective(SECRET, SECRET)))
+      assert.is_false(Core.ObjectiveOpen(api, nil))
+    end)
+
+    it("PartyQuestLookup finds a party member's open objective, never the player's own", function()
+      local lines = { { type = 2, leftText = "Kobold Vermin" }, title("Kobold Camp Cleanup"),
+        objective("Kobold Vermin slain: 10/10", true), who("Laure"), objective("Kobold Vermin slain: 4/10", false) }
+      assert.are.same({ true, "tooltip" }, { Core.PartyQuestLookup(tooltipAPI(lines), "nameplate1") })
+      -- Only the player's own objectives (open or not): not a party quest.
+      lines = { title("Kobold Camp Cleanup"), objective("Kobold Vermin slain: 4/10", false) }
+      assert.are.same({ false, "none" }, { Core.PartyQuestLookup(tooltipAPI(lines), "nameplate1") })
+      -- The player's own name on a QuestPlayer line is the player's own objectives.
+      lines = { title("Q"), who("Me"), objective("1/10", false) }
+      assert.are.same({ false, "none" }, { Core.PartyQuestLookup(tooltipAPI(lines), "nameplate1") })
+      -- A party member who is done: not open.
+      lines = { title("Q"), who("Laure"), objective("10/10", true) }
+      assert.are.same({ false, "none" }, { Core.PartyQuestLookup(tooltipAPI(lines), "nameplate1") })
+      -- A new QuestTitle line goes back to the player's own objectives.
+      lines = { title("Q1"), who("Laure"), objective("10/10", true), title("Q2"), objective("1/5", false) }
+      assert.are.same({ false, "none" }, { Core.PartyQuestLookup(tooltipAPI(lines), "nameplate1") })
+      -- An unreadable name skips that player's objectives.
+      lines = { title("Q"), who(SECRET), objective("1/10", false) }
+      assert.are.same({ false, "none" }, { Core.PartyQuestLookup(tooltipAPI(lines), "nameplate1") })
+    end)
+
+    it("PartyQuestLookup answers false for anything missing, failing or secret", function()
+      local lines = { title("Q"), who("Laure"), objective("1/10", false) }
+      assert.are.same({ false, "missing" }, { Core.PartyQuestLookup(nil, "u") })
+      assert.are.same({ false, "missing" }, { Core.PartyQuestLookup({}, "u") })
+      assert.are.same({ false, "missing" },
+        { Core.PartyQuestLookup(tooltipAPI(lines, { TooltipLineTypes = false }), "u") })
+      assert.are.same({ false, "missing" },
+        { Core.PartyQuestLookup(tooltipAPI(lines, { TooltipLineTypes = { QuestTitle = 17 } }), "u") })
+      assert.are.same({ false, "nogroup" },
+        { Core.PartyQuestLookup(tooltipAPI(lines, { IsInGroup = function() return false end }), "u") })
+      assert.are.same({ false, "none" }, { Core.PartyQuestLookup(tooltipAPI(lines), "") })
+      assert.are.same({ false, "none" }, { Core.PartyQuestLookup(tooltipAPI(lines), SECRET) })
+      for _, get in ipairs({ function() error("boom") end, function() return SECRET end,
+        function() return nil end, function() return { lines = SECRET } end }) do
+        assert.are.same({ false, "none" },
+          { Core.PartyQuestLookup(tooltipAPI(lines, { GetTooltipUnit = get }), "u") })
+      end
+      -- A line that raises on index is skipped without an error; the next lines still count.
+      local bad = setmetatable({}, { __index = function() error("protected") end })
+      assert.are.same({ true, "tooltip" },
+        { Core.PartyQuestLookup(tooltipAPI({ title("Q"), bad, who("Laure"), objective("1/2") }), "u") })
+    end)
+
+    it("UnitInfo asks only for an attackable unit not tied to the player's own quests", function()
+      local asked = 0
+      local api = tooltipAPI({ title("Q"), who("Laure"), objective("1/10", false) }, {
+        UnitCanAttack = function(_, unit) return unit ~= "friendly" end,
+        IsRelatedToActiveQuest = function(unit) return unit == "mine" end,
+      })
+      local get = api.GetTooltipUnit
+      api.GetTooltipUnit = function(...)
+        asked = asked + 1
+        return get(...)
+      end
+      local info = Core.UnitInfo(api, "theirs", {})
+      assert.is_true(info.partyQuest)
+      assert.are.equal("tooltip", info.partyQuestSource)
+      assert.are.equal(1, asked)
+      info = Core.UnitInfo(api, "mine", {})
+      assert.is_false(info.partyQuest)
+      assert.are.equal("skipped", info.partyQuestSource)
+      info = Core.UnitInfo(api, "friendly", {})
+      assert.are.equal("skipped", info.partyQuestSource)
+      assert.are.equal(1, asked)
+    end)
+
+    it("PlateMode: the player's own quest wins, then the party quest", function()
+      local on = { enabled = true, compact = true }
+      local base = { attackable = true, friend = false, player = false, member = false, self = false }
+      local function with(t)
+        local out = {}
+        for k, v in pairs(base) do
+          out[k] = v
+        end
+        for k, v in pairs(t) do
+          out[k] = v
+        end
+        return out
+      end
+      assert.are.equal("partyquest", (Core.PlateMode(with({ partyQuest = true }), on)))
+      assert.are.equal("quest", (Core.PlateMode(with({ quest = true, partyQuest = true }), on)))
+      assert.are.equal("default", (Core.PlateMode(with({ partyQuest = true }), { enabled = false })))
+      assert.are.equal("default", (Core.PlateMode(with({ partyQuest = 1 }), on)))
+      assert.are.equal("default", (Core.PlateMode(with({ partyQuest = true, attackable = false }), on)))
+      assert.are.equal("default", (Core.PlateMode(with({ partyQuest = true, self = true }), on)))
+    end)
+  end)
+
   describe("IsGroupMember", function()
     local players = { party1 = true, raid5 = true, nameplate1 = true, nameplate2 = true, nameplate3 = true,
       nameplate4 = true, player = true }
