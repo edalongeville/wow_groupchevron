@@ -1698,10 +1698,16 @@ end
 -- container (y = spacing), so SetScale alone only made it taller: width is the content width
 -- (nameplate width minus both insets, the parent's units), scale the bar's own scale before
 -- ours. Offsets are in the bar's own units once its scale is scale x f, hence the division.
--- nil for invalid input.
+-- At f = 1 the width is not needed (0, 0, spacing). nil for invalid input.
 function Core.BarOffsets(width, spacing, scale, f)
-  if not finite(width) or width <= 0 or not finite(spacing) or not finite(scale) or scale <= 0
-    or not finite(f) or f <= 0 then
+  if not finite(spacing) or not finite(scale) or scale <= 0 or not finite(f) or f <= 0 then
+    return nil
+  end
+  if f == 1 then
+    -- Blizzard's own width: nothing to widen, so the width is not needed.
+    return 0, 0, spacing
+  end
+  if not finite(width) or width <= 0 then
     return nil
   end
   local s = scale * f

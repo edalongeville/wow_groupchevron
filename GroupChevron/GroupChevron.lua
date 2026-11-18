@@ -993,9 +993,11 @@ local function ContentWidth()
 end
 
 -- LayBar anchors bar on uf's cast bar container like Blizzard does, widened for factor f with
--- the bar's own scale being scale x f. It returns false (nothing changed) when Blizzard's
--- layout cannot be known.
-local function LayBar(uf, bar, scale, f)
+-- the bar's own scale being scale x f. below: under the cast bar container instead (its top
+-- corners on the container's bottom corners, the same spacing), for compact plates, whose name
+-- takes the bottom of the plate (see Compact). It returns false (nothing changed) when
+-- Blizzard's layout cannot be known.
+local function LayBar(uf, bar, scale, f, below)
   local cast = Field(uf, "CastBarsContainer")
   local spacing = BlizzardNumber(_G.NamePlateSetupOptions, "castBarToHealthBarSpacing")
   if type(cast) ~= "table" or not spacing then
@@ -1006,8 +1008,13 @@ local function LayBar(uf, bar, scale, f)
     return false
   end
   Method(bar, "ClearAllPoints")
-  Method(bar, "SetPoint", "BOTTOMLEFT", cast, "TOPLEFT", left, y)
-  Method(bar, "SetPoint", "BOTTOMRIGHT", cast, "TOPRIGHT", right, y)
+  if below then
+    Method(bar, "SetPoint", "TOPLEFT", cast, "BOTTOMLEFT", left, -y)
+    Method(bar, "SetPoint", "TOPRIGHT", cast, "BOTTOMRIGHT", right, -y)
+  else
+    Method(bar, "SetPoint", "BOTTOMLEFT", cast, "TOPLEFT", left, y)
+    Method(bar, "SetPoint", "BOTTOMRIGHT", cast, "TOPRIGHT", right, y)
+  end
   return true
 end
 
@@ -1025,10 +1032,12 @@ local function RestoreBar(plate)
   end
 end
 
--- ScaleBar makes the plate's health bar part f times Blizzard's size (no-op without SetScale).
-local function ScaleBar(plate, uf, part, f)
+-- ScaleBar makes the plate's health bar part f times Blizzard's size (no-op without SetScale)
+-- and, with below, lays it out under the cast bar container (LayBar). It returns true when the
+-- bar is now under the cast bar container.
+local function ScaleBar(plate, uf, part, f, below)
   if not part or type(Field(part, "SetScale")) ~= "function" then
-    return
+    return false
   end
   local rec = bars[plate]
   if rec and rec.part ~= part then
@@ -1041,14 +1050,16 @@ local function ScaleBar(plate, uf, part, f)
     bars[plate] = rec
   end
   Method(part, "SetScale", rec.scale * f)
+  rec.below = nil
   -- Only the HealthBarsContainer is laid out by Blizzard as above.
-  if part == Field(uf, "HealthBarsContainer") and (f ~= 1 or rec.moved) then
-    if LayBar(uf, part, rec.scale, f) then
-      rec.moved = true
+  if part == Field(uf, "HealthBarsContainer") and (f ~= 1 or rec.moved or below) then
+    if LayBar(uf, part, rec.scale, f, below) then
+      rec.moved, rec.below = true, below and true or nil
     else
       NoticeOnce("barwidth", "nameplate layout not found: health bar size changes the height only")
     end
   end
+  return rec.below == true
 end
 
 -- RestoreScales gives every part we scaled on the plate its original scale (and the health
@@ -1421,17 +1432,16 @@ local function FollowBar(plate, unit, curve, alpha, barDriven, hurt)
   Method(rec.short, "SetAlpha", 0)
 end
 
--- NameSpot.Drop moves our name on a compact plate down to where its health bar is (drop, see
--- Core.NameDrops: the bar is faded out, its place kept) or back above it, where Blizzard puts
--- its name. Our name's bottom then sits at the bar's bottom plus the name gap; the chevron and
--- the role icon, anchored on our name, follow it. Nothing to do when our name is not drawn
--- (Blizzard's name stays where it is) or the plate has no health bar.
-function NameSpot.Drop(plate, uf, drop)
+-- NameSpot.Drop anchors our name on a compact plate at the bottom of base (plus the name gap)
+-- instead of Blizzard's name: the cast bar container when the health bar was laid out under it
+-- (Compact), else the faded health bar (Core.NameDrops), or nil: back where Blizzard's name is.
+-- The chevron and the role icon, anchored on our name, follow it. Nothing to do when our name
+-- is not drawn (Blizzard's name stays where it is).
+function NameSpot.Drop(plate, base)
   local rec = labels[plate]
   if not rec or not rec.name then
     return
   end
-  local base = drop and BarPart(uf) or nil
   if rec.drop == base then
     return
   end
@@ -1555,6 +1565,11 @@ local function Uncompact(plate)
     owners[part] = nil
     Method(part, "SetAlpha", 1)
   end
+  -- A marked plate keeps its scales, but its bar goes back above the cast bar (Blizzard's place).
+  local bar = bars[plate]
+  if bar and bar.below then
+    RestoreBar(plate)
+  end
 end
 
 -- Compact fades out every part of the plate but the name, and the health bar while unit is
@@ -1594,7 +1609,9 @@ local function Compact(plate, uf, unit, level, bar, subtitle)
     end
     return
   end
-  ScaleBar(plate, uf, BarPart(uf), bar or Factor("otherbarsize"))
+  -- The health bar goes under the cast bar container, so our name can take the bottom of the
+  -- plate whether the bar shows or not (its state may be secret, see NameSpot.Drop below).
+  local below = ScaleBar(plate, uf, BarPart(uf), bar or Factor("otherbarsize"), true)
   local rec = hidden[plate]
   if not rec then
     rec = { set = {}, list = {}, drive = {} }
@@ -1644,12 +1661,18 @@ local function Compact(plate, uf, unit, level, bar, subtitle)
     end
   end
   FollowBar(plate, unit, curve, alpha, barDriven and driven, hurt)
-  -- With the curve, whether the bar shows is only known from a readable health.
+  if below then
+    NameSpot.Drop(plate, Field(uf, "CastBarsContainer"))
+    return
+  end
+  -- The bar could not be moved: our name goes into its place only while it is known hidden
+  -- (with the curve, only a readable health tells).
   local known
   if curve then
     known = Core.KnownHurt(unitAPI, unit)
   end
-  NameSpot.Drop(plate, uf, Core.NameDrops(curve and true or false, barDriven and driven, hurt, known))
+  NameSpot.Drop(plate, Core.NameDrops(curve and true or false, barDriven and driven, hurt, known)
+    and BarPart(uf) or nil)
 end
 
 -- ModeSettings is the saved settings the plate mode reads (not Blizzard's global `Settings`,
@@ -2945,7 +2968,10 @@ local function OnHealth(unit)
       end
       -- The "(level)" suffix follows the bar (its alpha cannot be compared with the last one).
       FollowBar(uf, unit, true, alpha, barDriven and driven, false)
-      NameSpot.Drop(uf, uf, Core.NameDrops(true, barDriven and driven, nil, Core.KnownHurt(unitAPI, unit)))
+      if not (bars[uf] and bars[uf].below) then
+        NameSpot.Drop(uf, Core.NameDrops(true, barDriven and driven, nil, Core.KnownHurt(unitAPI, unit))
+          and BarPart(uf) or nil)
+      end
       return
     end
   elseif rec.hurt == Core.HealthMissing(unitAPI, unit) then
@@ -3429,7 +3455,9 @@ local function SlashDebug()
   local known = Core.KnownHurt(unitAPI, type(unit) == "string" and unit or "target")
   Print(string.format("debug: our name %s; compact %s, curve %s, health known hurt %s, bar part %s",
     not (lrec and lrec.name) and "not drawn"
-      or (lrec.drop and "dropped onto the health bar" or "above the bar (Blizzard's place)"),
+      or (not lrec.drop and "above the bar (Blizzard's place)")
+      or (lrec.drop == Field(uf, "CastBarsContainer") and "at the bottom of the plate, bar laid under it")
+      or "dropped onto the health bar",
     hrec and "yes" or "no", hrec and tostring(hrec.curve) or "-", tostring(known),
     BarPart(uf) and PartLabel(BarPart(uf), { uf }) or "none"))
   -- The target itself is never compact, so also list what compact mode would hide on it:

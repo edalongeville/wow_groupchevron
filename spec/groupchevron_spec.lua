@@ -1344,11 +1344,13 @@ describe("GroupChevron", function()
       local bar = uf.HealthBarsContainer
       local blizzard = { { "BOTTOMLEFT", cast, "TOPLEFT", 0, 2 }, { "BOTTOMRIGHT", cast, "TOPRIGHT", 0, 2 } }
 
-      -- A friendly outside the group first (otherbarsize 1.5): 65 more, 32.5 per side.
+      -- A compact friendly outside the group first (otherbarsize 1.5): 65 more, 32.5 per side,
+      -- under the cast bar container (our name takes the bottom of the plate).
       friend(env, plate)
       assert.are.equal(1.5, bar.scale)
-      assert.are.same({ { "BOTTOMLEFT", cast, "TOPLEFT", -32.5 / 1.5, 2 / 1.5 },
-        { "BOTTOMRIGHT", cast, "TOPRIGHT", 32.5 / 1.5, 2 / 1.5 } }, bar.points)
+      assert.are.same({ { "TOPLEFT", cast, "BOTTOMLEFT", -32.5 / 1.5, -2 / 1.5 },
+        { "TOPRIGHT", cast, "BOTTOMRIGHT", 32.5 / 1.5, -2 / 1.5 } }, bar.points)
+      assert.are.equal(cast, env.label(plate).points[1][2])
       -- Then a member (barsize 2): 130 more, 65 per side (32.5 in the doubled bar's units).
       env.world.party.nameplate2 = true
       env.fire("GROUP_ROSTER_UPDATE")
@@ -1363,6 +1365,62 @@ describe("GroupChevron", function()
       env.fire("NAME_PLATE_UNIT_REMOVED", "nameplate2")
       assert.are.equal(1, bar.scale)
       assert.are.same(blizzard, bar.points)
+    end)
+
+    it("lays a compact plate's bar under the cast bar and puts the name at the plate's bottom", function()
+      local env = load({ overrides = layout() })
+      local plate = newTreePlate("nameplate2")
+      local uf = plate.UnitFrame
+      local cast = newPart("Frame", uf)
+      uf.CastBarsContainer = cast
+      local bar = uf.HealthBarsContainer
+      local under = { { "TOPLEFT", cast, "BOTTOMLEFT", 0, -2 }, { "TOPRIGHT", cast, "BOTTOMRIGHT", 0, -2 } }
+      local blizzard = { { "BOTTOMLEFT", cast, "TOPLEFT", 0, 2 }, { "BOTTOMRIGHT", cast, "TOPRIGHT", 0, 2 } }
+      env.world.health.nameplate2 = { 40, 100 }
+      friend(env, plate)
+      -- Hurt or not, the bar is under the cast bar and our name at the bottom of the plate.
+      assert.are.same(under, bar.points)
+      assert.are.same({ "BOTTOM", cast, "BOTTOM", 0, 0 }, env.label(plate).points[1])
+      env.world.health.nameplate2 = { 100, 100 }
+      env.fire("UNIT_HEALTH", "nameplate2")
+      assert.are.same(under, bar.points)
+      assert.are.equal(cast, env.label(plate).points[1][2])
+      env.slash("othernamegap 3")
+      assert.are.same({ "BOTTOM", cast, "BOTTOM", 0, 3 }, env.label(plate).points[1])
+      -- Targeted (a full plate): Blizzard's layout and place again; untargeted: under again.
+      env.world.target = "nameplate2"
+      env.fire("PLAYER_TARGET_CHANGED")
+      assert.are.same(blizzard, bar.points)
+      assert.are.equal(uf.name, env.label(plate).points[1][2])
+      env.world.target = nil
+      env.fire("PLAYER_TARGET_CHANGED")
+      assert.are.same(under, bar.points)
+      -- Joins the group (a full, marked plate): Blizzard's layout back.
+      env.world.party.nameplate2 = true
+      env.fire("GROUP_ROSTER_UPDATE")
+      assert.are.same(blizzard, bar.points)
+      assert.are.equal(uf.name, env.label(plate).points[1][2])
+      -- Compact again, then removed: Blizzard's layout back.
+      env.world.party.nameplate2 = nil
+      env.fire("GROUP_ROSTER_UPDATE")
+      assert.are.same(under, bar.points)
+      env.fire("NAME_PLATE_UNIT_REMOVED", "nameplate2")
+      assert.are.same(blizzard, bar.points)
+      assert.is_false(printedContains(env, "error in"))
+    end)
+
+    it("lays a compact NPC's bar under the cast bar even while its health is secret", function()
+      local o = layout()
+      o.issecretvalue = function(v) return v == "secret" end
+      o.UnitHealth = function() return "secret" end
+      local env = load({ overrides = o })
+      local plate = newTreePlate("nameplate2")
+      local uf = plate.UnitFrame
+      local cast = newPart("Frame", uf)
+      uf.CastBarsContainer = cast
+      friend(env, plate)
+      assert.are.same({ "TOPLEFT", cast, "BOTTOMLEFT", 0, -2 }, uf.HealthBarsContainer.points[1])
+      assert.are.equal(cast, env.label(plate).points[1][2])
     end)
 
     it("never touches the anchors of a bar left at size 1", function()

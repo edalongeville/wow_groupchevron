@@ -1924,6 +1924,8 @@ describe("Core.BarOffsets", function()
 
   it("gives Blizzard's layout back at factor 1", function()
     assert.are.same({ 0, 0, 2 }, { Core.BarOffsets(200, 2, 1, 1) })
+    -- The width is not needed then.
+    assert.are.same({ 0, 0, 2 }, { Core.BarOffsets(nil, 2, 1, 1) })
   end)
 
   it("refuses invalid input", function()
