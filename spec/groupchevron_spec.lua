@@ -3906,6 +3906,24 @@ describe("GroupChevron", function()
       assert.are.equal("GroupChevron - Quest mobs", page(rec, "Quest mobs").labels[1].text)
     end)
 
+    it("anchors each chevron preview on its own page, even once the panel is built", function()
+      local overrides, rec = widgetClient()
+      load({ overrides = overrides })
+      rec.frame.scripts.OnShow(rec.frame)
+      for name, count in pairs({ ["Friendly players"] = 3, ["Quest mobs"] = 1 }) do
+        local content = page(rec, name)
+        local vs = 0
+        for _, t in ipairs(content.textures) do
+          if t.texture == "Interface\\AddOns\\GroupChevron\\chevron.tga" and t.vertex and t.vertex[1] ~= 0 then
+            vs = vs + 1
+            assert.are.equal(content, t.points[1][2], name)
+          end
+        end
+        -- A double chevron per section on the players' page, a single one for the quest mobs.
+        assert.are.equal(name == "Quest mobs" and 1 or 2 * count, vs, name)
+      end
+    end)
+
     it("falls back to one category per page without sub-categories", function()
       local overrides, rec = widgetClient({ noSubcategories = true })
       local env = load({ overrides = overrides })

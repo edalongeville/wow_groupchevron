@@ -2447,7 +2447,9 @@ local function BuildPanel()
     local squareTop = swatchY + 6
     -- A grey rounded square, so that the colour and the black outline both stand out (a plain
     -- square when the client cannot load the texture).
-    local backdrop = content:CreateTexture(nil, "BACKGROUND")
+    -- The page this preview is on: `content` moves on to other pages before Update runs.
+    local page = content
+    local backdrop = page:CreateTexture(nil, "BACKGROUND")
     local ok, loaded = pcall(backdrop.SetTexture, backdrop, BACKDROP_TEXTURE)
     if ok and loaded ~= false then
       backdrop:SetVertexColor(0.62, 0.62, 0.62, 1)
@@ -2455,9 +2457,9 @@ local function BuildPanel()
       backdrop:SetColorTexture(0.62, 0.62, 0.62, 1)
     end
     backdrop:SetSize(PREVIEW_SIZE, PREVIEW_SIZE)
-    backdrop:SetPoint("TOPLEFT", content, "TOPLEFT", PREVIEW_X, squareTop)
+    backdrop:SetPoint("TOPLEFT", page, "TOPLEFT", PREVIEW_X, squareTop)
     local function Add(step, alpha)
-      local v = content:CreateTexture(nil, "OVERLAY")
+      local v = page:CreateTexture(nil, "OVERLAY")
       local vok, vloaded = pcall(v.SetTexture, v, CHEVRON_TEXTURE)
       if not vok or vloaded == false then
         Method(v, "Hide")
@@ -2466,7 +2468,7 @@ local function BuildPanel()
       v:SetAlpha(alpha)
       local outlines = {}
       for _, dir in ipairs(OUTLINE_DIRS) do
-        local outline = content:CreateTexture(nil, "ARTWORK")
+        local outline = page:CreateTexture(nil, "ARTWORK")
         outline:SetTexture(CHEVRON_TEXTURE)
         outline:SetVertexColor(0, 0, 0, 1)
         outline:SetAlpha(alpha)
@@ -2490,7 +2492,7 @@ local function BuildPanel()
         item.v:SetVertexColor(r, g, b, 1)
         item.v:SetSize(V_WIDTH * f, V_HEIGHT * f)
         item.v:ClearAllPoints()
-        item.v:SetPoint("TOPLEFT", content, "TOPLEFT", left, top - item.step * f)
+        item.v:SetPoint("TOPLEFT", page, "TOPLEFT", left, top - item.step * f)
         for _, outline in ipairs(item.outlines) do
           outline:SetSize(V_WIDTH * f, V_HEIGHT * f)
           outline:ClearAllPoints()
