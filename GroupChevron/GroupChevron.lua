@@ -6,6 +6,7 @@
 -- colour (default #3FA7FF) and, unless friendchevron is off, the same chevron in that colour.
 -- With compact on (default), other friendly players (friends included) who are not the
 -- current target show only their name; everyone else's plate is left as Blizzard draws it.
+-- While a compact plate's health bar is hidden, the name sits where the bar is, not above it.
 -- With classcolor on (default on), the other friendly players (not members, not friends,
 -- target or not, compact or not) get their name in their class colour, the client's own.
 -- Unless showlevel is off, friendly players outside the group (friends included) get their
@@ -735,6 +736,7 @@ local function HideFullName(plate)
     return
   end
   Method(rec.frame, "Hide")
+  rec.drop = nil
   if rec.name then
     local fs = rec.name
     rec.name = nil
@@ -769,6 +771,30 @@ local function NameText(fs)
     return nil
   end
   return text
+end
+
+-- NameSpot holds Place and Drop (one table: the main chunk is close to Lua 5.1's limit of
+-- 200 locals).
+local NameSpot = {}
+
+-- NameSpot.Place anchors our name on the plate: the subtitle (when shown) at rec.offset above the
+-- bottom of base, our name on top of it, else our name there. base is rec.drop (the health bar,
+-- see NameSpot.Drop) or else fs, Blizzard's name.
+function NameSpot.Place(rec, fs)
+  local base = rec.drop or fs
+  local first = rec.subShown and rec.sub or nil
+  if first then
+    first:ClearAllPoints()
+    first:SetPoint("BOTTOM", base, "BOTTOM", 0, rec.offset)
+  end
+  for _, label in ipairs({ rec.text, rec.short }) do
+    label:ClearAllPoints()
+    if first then
+      label:SetPoint("BOTTOM", first, "TOP", 0, SUBTITLE_GAP)
+    else
+      label:SetPoint("BOTTOM", base, "BOTTOM", 0, rec.offset)
+    end
+  end
 end
 
 -- ShowFullName draws fs's text with our own FontString, in fs's font object (so the same
@@ -844,10 +870,6 @@ local function ShowFullName(plate, uf, fs, size, r, g, b, lift, gap, level, subt
       end
     end
     label:SetTextColor(r, g, b, 1)
-    label:ClearAllPoints()
-    -- lift (buffs) and gap (namegap / othernamegap) are in the parent's units; our frame is
-    -- scaled by size.
-    label:SetPoint("BOTTOM", fs, "BOTTOM", 0, Core.NameOffset(lift, gap, size))
   end
   local label = rec.text
   label:SetText(text)
@@ -874,17 +896,17 @@ local function ShowFullName(plate, uf, fs, size, r, g, b, lift, gap, level, subt
     end
     sub:SetTextColor(r, g, b, 1)
     sub:SetText(subtitle)
-    sub:ClearAllPoints()
-    sub:SetPoint("BOTTOM", fs, "BOTTOM", 0, Core.NameOffset(lift, gap, size))
-    for _, l in ipairs({ rec.text, rec.short }) do
-      l:ClearAllPoints()
-      l:SetPoint("BOTTOM", sub, "TOP", 0, SUBTITLE_GAP)
-    end
     Method(sub, "SetAlpha", 1)
     sub:Show()
   elseif rec.sub then
     rec.sub:Hide()
   end
+  rec.subShown = subtitle and true or nil
+  -- lift (buffs) and gap (namegap / othernamegap) are in the parent's units; our frame is
+  -- scaled by size. The name starts where Blizzard's is; compact mode may then drop it.
+  rec.offset = Core.NameOffset(lift, gap, size)
+  rec.drop = nil
+  NameSpot.Place(rec, fs)
   rec.name = fs
   FadeName(fs)
   rec.frame:Show()
@@ -1399,6 +1421,24 @@ local function FollowBar(plate, unit, curve, alpha, barDriven, hurt)
   Method(rec.short, "SetAlpha", 0)
 end
 
+-- NameSpot.Drop moves our name on a compact plate down to where its health bar is (drop, see
+-- Core.NameDrops: the bar is faded out, its place kept) or back above it, where Blizzard puts
+-- its name. Our name's bottom then sits at the bar's bottom plus the name gap; the chevron and
+-- the role icon, anchored on our name, follow it. Nothing to do when our name is not drawn
+-- (Blizzard's name stays where it is) or the plate has no health bar.
+function NameSpot.Drop(plate, uf, drop)
+  local rec = labels[plate]
+  if not rec or not rec.name then
+    return
+  end
+  local base = drop and BarPart(uf) or nil
+  if rec.drop == base then
+    return
+  end
+  rec.drop = base
+  NameSpot.Place(rec, rec.name)
+end
+
 -- HealthBarParts returns UnitFrame's health bar parts (HealthBarsContainer, healthBar), the
 -- ones compact mode shows while the unit is hurt.
 local function HealthBarParts(uf)
@@ -1604,6 +1644,12 @@ local function Compact(plate, uf, unit, level, bar, subtitle)
     end
   end
   FollowBar(plate, unit, curve, alpha, barDriven and driven, hurt)
+  -- With the curve, whether the bar shows is only known from a readable health.
+  local known
+  if curve then
+    known = Core.KnownHurt(unitAPI, unit)
+  end
+  NameSpot.Drop(plate, uf, Core.NameDrops(curve and true or false, barDriven and driven, hurt, known))
 end
 
 -- ModeSettings is the saved settings the plate mode reads (not Blizzard's global `Settings`,
@@ -2899,6 +2945,7 @@ local function OnHealth(unit)
       end
       -- The "(level)" suffix follows the bar (its alpha cannot be compared with the last one).
       FollowBar(uf, unit, true, alpha, barDriven and driven, false)
+      NameSpot.Drop(uf, uf, Core.NameDrops(true, barDriven and driven, nil, Core.KnownHurt(unitAPI, unit)))
       return
     end
   elseif rec.hurt == Core.HealthMissing(unitAPI, unit) then

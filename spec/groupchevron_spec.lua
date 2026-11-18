@@ -881,6 +881,50 @@ describe("GroupChevron", function()
       assert.are.same({ 0, 0, 0 }, alphas(plate))
     end)
 
+    it("drops the name into the faded health bar's place, and back above the bar while it shows", function()
+      local env = load()
+      local plate = newTreePlate("nameplate2")
+      local uf = plate.UnitFrame
+      env.world.health.nameplate2 = { 40, 100 }
+      friend(env, plate)
+      local function base()
+        return env.label(plate).points[1][2]
+      end
+      -- Hurt: the bar shows, our name stays where Blizzard's is, above it.
+      assert.are.equal(uf.name, base())
+      -- Healed: the bar is faded, the name goes into its place.
+      env.world.health.nameplate2 = { 100, 100 }
+      env.fire("UNIT_HEALTH", "nameplate2")
+      assert.are.equal(uf.HealthBarsContainer, base())
+      -- A name update keeps it there.
+      env.hooks.CompactUnitFrame_UpdateName(uf)
+      assert.are.equal(uf.HealthBarsContainer, base())
+      -- Hurt again: back above the bar.
+      env.world.health.nameplate2 = { 99, 100 }
+      env.fire("UNIT_HEALTH", "nameplate2")
+      assert.are.equal(uf.name, base())
+      -- Full health, targeted (a full plate): above the bar; untargeted: dropped again.
+      env.world.health.nameplate2 = { 100, 100 }
+      env.fire("UNIT_HEALTH", "nameplate2")
+      -- (othernamegap: our name is drawn on the plain friendly's full plate too.)
+      env.slash("othernamegap 4")
+      assert.are.equal(uf.HealthBarsContainer, base())
+      env.world.target = "nameplate2"
+      env.fire("PLAYER_TARGET_CHANGED")
+      local _, holder = env.label(plate)
+      assert.is_true(holder.shown)
+      assert.are.equal(uf.name, base())
+      assert.are.equal(1, uf.HealthBarsContainer.alpha)
+      env.world.target = nil
+      env.fire("PLAYER_TARGET_CHANGED")
+      assert.are.equal(uf.HealthBarsContainer, base())
+      -- Compact off: Blizzard's place again (or Blizzard's own name).
+      env.slash("compact off")
+      _, holder = env.label(plate)
+      assert.is_true(holder.shown == false or base() == uf.name)
+      assert.is_false(printedContains(env, "error in"))
+    end)
+
     describe("with secret health (health curve)", function()
       -- secrets: poison value -> the number it stands for (only the spec's fakes look it up).
       local secrets = setmetatable({}, { __mode = "k" })
@@ -1026,6 +1070,44 @@ describe("GroupChevron", function()
         end)
         assert.are.same({ 1, 0, 0 }, alphas(plate))
         assert.are.equal(1, #s.curves)
+        assert.is_false(printedContains(env, "error in"))
+      end)
+
+      it("keeps the name above the bar while the health is secret (the bar's state is unknown)", function()
+        local s = {}
+        local env, plate = setup(s)
+        local uf = plate.UnitFrame
+        assert.are.equal(uf.name, env.label(plate).points[1][2])
+        env.world.health.nameplate2 = { 100, 100 }
+        env.fire("UNIT_HEALTH", "nameplate2")
+        assert.are.same({ 0, 0, 0 }, alphas(plate))
+        assert.are.equal(uf.name, env.label(plate).points[1][2])
+        assert.is_false(printedContains(env, "error in"))
+      end)
+
+      it("drops the name at full health when the health is readable, and lifts it while hurt", function()
+        local s = {}
+        local function health(unit)
+          return s.env.world.health[unit] or { 100, 100 }
+        end
+        local env, plate = setup(s, {
+          UnitHealth = function(unit) return health(unit)[1] end,
+          UnitHealthMax = function(unit) return health(unit)[2] end,
+        })
+        local uf = plate.UnitFrame
+        -- Hurt (40 / 100): the bar shows from the curve, the name above it.
+        assert.are.same({ 1, 0, 0 }, alphas(plate))
+        assert.are.equal(uf.name, env.label(plate).points[1][2])
+        -- Healed: the curve fades the bar, the name goes into its place.
+        env.world.health.nameplate2 = { 100, 100 }
+        env.fire("UNIT_HEALTH", "nameplate2")
+        assert.are.same({ 0, 0, 0 }, alphas(plate))
+        assert.are.equal(uf.HealthBarsContainer, env.label(plate).points[1][2])
+        -- Hurt again.
+        env.world.health.nameplate2 = { 60, 100 }
+        env.fire("UNIT_HEALTH", "nameplate2")
+        assert.are.same({ 1, 0, 0 }, alphas(plate))
+        assert.are.equal(uf.name, env.label(plate).points[1][2])
         assert.is_false(printedContains(env, "error in"))
       end)
 
@@ -1314,10 +1396,12 @@ describe("GroupChevron", function()
       local env = load({ saved = { buffsize = 2, textsize = 2 }, overrides = o })
       local plate = newTreePlate("nameplate2")
       plate.UnitFrame.AurasFrame.auraItemScale = 0.8
-      local fs = plate.UnitFrame.name
-      local function offset()
+      local fs, bar = plate.UnitFrame.name, plate.UnitFrame.HealthBarsContainer
+      -- offset returns our name's offset, checking its anchor: the health bar on a compact
+      -- plate at full health (bar faded, the name dropped into its place), else Blizzard's name.
+      local function offset(base)
         local label = env.label(plate)
-        assert.are.equal(fs, label.points[1][2])
+        assert.are.equal(base or bar, label.points[1][2])
         return label.points[1][5]
       end
 
@@ -1337,12 +1421,12 @@ describe("GroupChevron", function()
       -- Joins the group: (buff lift 10 + namegap 4) / textsize 2; othernamegap does not apply.
       env.world.party.nameplate2 = true
       env.fire("GROUP_ROSTER_UPDATE")
-      assert.are.equal(7, offset())
+      assert.are.equal(7, offset(fs))
       assert.are.equal(env.label(plate), env.chevron(plate).points[1][2]) -- the chevron follows
       env.slash("othernamegap -3")
-      assert.are.equal(7, offset())
+      assert.are.equal(7, offset(fs))
       env.slash("buffsize 1")
-      assert.are.equal(2, offset())
+      assert.are.equal(2, offset(fs))
 
       -- Leaves: othernamegap again, at othersize 1.
       env.world.party.nameplate2 = nil
@@ -1530,7 +1614,8 @@ describe("GroupChevron", function()
       env.fire("NAME_PLATE_UNIT_ADDED", "nameplate2")
       local label, holder = env.label(plate)
       assert.are.equal(other, holder.parent)
-      assert.are.equal(other.name, label.points[1][2])
+      -- Compact at full health: on the new UnitFrame's own (faded) health bar.
+      assert.are.equal(other.HealthBarsContainer, label.points[1][2])
       assert.are.equal(0, other.name.alpha)
       assert.are.equal(1, first.name.alpha)
     end)
@@ -3475,17 +3560,19 @@ describe("GroupChevron", function()
       local sub = holder.labels[#holder.labels]
       assert.are.equal("<Maître des gryphons>", sub.text)
       assert.is_true(sub.shown)
-      assert.are.equal(uf.name, sub.points[1][2])
-      assert.are.equal(3, sub.points[1][5])
+      -- Compact at full health: where the faded health bar is (+ npcnamegap).
+      assert.are.same({ "BOTTOM", uf.HealthBarsContainer, "BOTTOM", 0, 3 }, sub.points[1])
       assert.are.equal(sub, label.points[1][2])
       assert.are.equal("TOP", label.points[1][3])
       assert.are.equal(label, icon(env, plate).points[1][2])
       assert.are.equal(label.color[1], sub.color[1])
-      -- Hurt: the bar shows and the level stays.
+      -- Hurt: the bar shows and the level stays; the subtitle goes back above the bar.
       env.world.health.nameplate5 = { 50, 100 }
       env.fire("UNIT_HEALTH", "nameplate5")
       assert.are.equal("Farbatosz Marokbar (55)", label.text)
       assert.are.equal(1, label.alpha)
+      assert.are.same({ "BOTTOM", uf.name, "BOTTOM", 0, 3 }, sub.points[1])
+      assert.are.equal(sub, label.points[1][2])
     end)
 
     it("takes the game's reaction colour for the name, and gives Blizzard's back afterwards", function()
@@ -3526,7 +3613,7 @@ describe("GroupChevron", function()
       for _, l in ipairs(holder.labels) do
         assert.is_true(l == label or l.text ~= "Level 12 Humanoid" or l.shown == false)
       end
-      assert.are.equal(plate.UnitFrame.name, label.points[1][2])
+      assert.are.equal(plate.UnitFrame.HealthBarsContainer, label.points[1][2])
     end)
 
     it("keeps Blizzard's full plate with npccompact off, and sizes the icon", function()
