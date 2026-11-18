@@ -50,6 +50,7 @@ local function newRegion()
   end
   function r:SetVertexColor(cr, cg, cb, ca) self.vertex = { cr, cg, cb, ca } end
   function r:SetTexCoord(...) self.texcoord = { ... } end
+  function r:SetAtlas(name) self.atlas, self.texture = name, nil end
   return r
 end
 
@@ -3244,6 +3245,7 @@ describe("GroupChevron", function()
           end,
         },
         Enum = { PlayerInteractionType = { Merchant = 5, TaxiNode = 6 } },
+        C_Texture = { GetAtlasInfo = function(name) return name == "FlightMaster" and { width = 64 } or nil end },
       }
       -- The friendly NPC options start from their defaults (compact on, icon size 5).
       saved = saved or {}
@@ -3300,6 +3302,35 @@ describe("GroupChevron", function()
       local frame, texture = icon(env, plate)
       assert.is_true(frame.shown)
       assert.are.equal("Interface\\Icons\\Ability_Mount_Gryphon_01", texture)
+    end)
+
+    it("lets the player pick a role's icon: an atlas the client has, or a texture path", function()
+      local env = load(npcClient({ subtitle = "Gryphon Master" }))
+      local plate = newTreePlate("nameplate5")
+      showNPC(env, plate)
+      local frame = icon(env, plate)
+      env.slash("icon flight FlightMaster")
+      assert.are.equal("FlightMaster", env.GroupChevronDB.roleicons.flight)
+      assert.are.equal("FlightMaster", frame.tex.atlas)
+      assert.is_true(frame.shown)
+      -- An atlas the client does not have, an unknown role or a bad name: refused.
+      env.slash("icon flight NoSuchAtlas")
+      assert.is_true(printedContains(env, "no atlas \"NoSuchAtlas\""))
+      env.slash("icon wizard FlightMaster")
+      assert.is_true(printedContains(env, "unknown role"))
+      env.slash("icon flight bad name!")
+      assert.are.equal("FlightMaster", env.GroupChevronDB.roleicons.flight)
+      -- A texture path, shown whole unless it is an Interface\Icons one.
+      env.slash("icon flight Interface\\Minimap\\Tracking\\FlightMaster")
+      assert.are.equal("Interface\\Minimap\\Tracking\\FlightMaster", frame.tex.texture)
+      assert.are.same({ 0, 1, 0, 1 }, frame.tex.texcoord)
+      -- Back to the default; /gchev icon lists them all.
+      env.slash("icon flight default")
+      assert.is_nil(env.GroupChevronDB.roleicons.flight)
+      assert.are.equal("Interface\\Icons\\Ability_Mount_Gryphon_01", frame.tex.texture)
+      env.slash("icon")
+      assert.is_true(printedContains(env, "icon vendor: Interface\\Icons\\INV_Misc_Coin_01"))
+      assert.is_false(printedContains(env, "error in"))
     end)
 
     it("shows the target's full plate, with the icon, and never scales an NPC's health bar", function()

@@ -23,6 +23,7 @@ read_globals = {
   "C_PlayerInfo",
   "C_QuestLog",
   "C_Reputation",
+  "C_Texture",
   "C_Timer",
   "C_TooltipInfo",
   "CanMerchantRepair",

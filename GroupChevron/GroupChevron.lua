@@ -592,27 +592,67 @@ local function GetIcon(plate, uf)
   frame = CreateFrame("Frame", nil, uf)
   frame.tex = frame:CreateTexture(nil, "OVERLAY")
   Method(frame.tex, "SetAllPoints", frame)
-  local crop = Core.ICON_CROP
-  Method(frame.tex, "SetTexCoord", crop[1], crop[2], crop[3], crop[4])
   frame:Hide()
   icons[plate] = frame
   return frame
 end
 
+-- IconName returns the icon of role: the player's choice (db.roleicons), else Core.RoleIcon.
+local function IconName(role)
+  local chosen = type(db) == "table" and type(db.roleicons) == "table" and db.roleicons[role]
+  if Core.ValidIconName(chosen) then
+    return chosen
+  end
+  return Core.RoleIcon(role)
+end
+
+-- AtlasKnown returns true or false when the client says whether it has the atlas name
+-- (C_Texture.GetAtlasInfo), or nil when it cannot tell.
+local function AtlasKnown(name)
+  local get = Field(C_Texture, "GetAtlasInfo")
+  if type(get) ~= "function" then
+    return nil
+  end
+  local ok, info = pcall(get, name)
+  if not ok then
+    return nil
+  end
+  return Readable(info) ~= nil
+end
+
+-- SetIconTexture puts the icon name (a texture path or an atlas name) on tex. It returns false
+-- when the client cannot load it (an unknown atlas, a texture that does not load).
+local function SetIconTexture(tex, name)
+  if Core.IsTexturePath(name) then
+    local ok, loaded = pcall(tex.SetTexture, tex, name)
+    if not ok or loaded == false then
+      return false
+    end
+    local crop = Core.IconCrop(name)
+    Method(tex, "SetTexCoord", crop[1], crop[2], crop[3], crop[4])
+    return true
+  end
+  if AtlasKnown(name) == false or type(Field(tex, "SetAtlas")) ~= "function" then
+    return false
+  end
+  local ok, loaded = pcall(tex.SetAtlas, tex, name)
+  return ok and loaded ~= false
+end
+
 -- ShowIcon shows role's icon on the plate, its bottom GAP above anchor (else above uf). It returns
 -- false (and hides the icon) when the role has no icon or the client cannot load its texture.
 local function ShowIcon(plate, uf, anchor, role)
-  local path = Core.RoleIcon(role)
+  local path = IconName(role)
   local frame = path and GetIcon(plate, uf)
   if not frame then
     return false
   end
   if frame.path ~= path then
-    local ok, loaded = pcall(frame.tex.SetTexture, frame.tex, path)
-    if not ok or loaded == false then
+    if not SetIconTexture(frame.tex, path) then
       frame.path = nil
       frame:Hide()
-      NoticeOnce("noicon", "service NPC icon texture not found (" .. path .. "): no icon is shown")
+      NoticeOnce("noicon:" .. path, "friendly NPC icon not found (" .. path .. "): no icon is shown; "
+        .. "/gchev icon " .. tostring(role) .. " <texture or atlas> picks another one")
       return false
     end
     frame.path = path
@@ -2964,6 +3004,7 @@ local function SlashStatus()
     .. " | othersize 1-3 | otherbarsize 1-3 | othernamegap -10-40 | level on|off | compact on|off | classcolor on|off"
     .. " | font default|outline|chat|large|game13"
     .. " | npcplates on|off | npcicons on|off | npccompact on|off | npcsize 1-3 | npciconsize 1-15"
+    .. " | icon [<role> <texture or atlas>|default]"
     .. " | reset | options | debug")
 end
 
@@ -3145,6 +3186,57 @@ local function SlashDebug()
   end
 end
 
+-- SlashIcon (/gchev icon [role [name|default]]) lists the role icons, or sets one: a texture path
+-- (Interface\Icons\...) or an atlas name the client has; "default" gives the role its own back.
+local function SlashIcon(arg)
+  local role, name = arg:match("^(%S*)%s*(.-)%s*$")
+  role = (role or ""):lower()
+  if role == "" then
+    for _, r in ipairs(Core.ROLES) do
+      local chosen = db.roleicons[r.key]
+      Print(string.format("icon %s: %s%s", r.key, IconName(r.key), chosen and " (yours)" or ""))
+    end
+    Print("/gchev icon <role> <texture or atlas> | /gchev icon <role> default")
+    return
+  end
+  if not Core.ValidRole(role) then
+    local keys = {}
+    for _, r in ipairs(Core.ROLES) do
+      keys[#keys + 1] = r.key
+    end
+    Print(string.format("unknown role %q: use %s; nothing changed", role, table.concat(keys, " | ")))
+    return
+  end
+  if name == "" then
+    Print(string.format("icon %s: %s", role, IconName(role)))
+    return
+  end
+  if name:lower() == "default" then
+    db.roleicons[role] = nil
+    Changed()
+    Print(string.format("icon %s: %s (default)", role, IconName(role)))
+    return
+  end
+  if not Core.ValidIconName(name) then
+    Print(string.format("invalid icon %q: use a texture path (Interface\\Icons\\...) or an atlas name; "
+      .. "nothing changed", name))
+    return
+  end
+  if not Core.IsTexturePath(name) then
+    local known = AtlasKnown(name)
+    if known == false then
+      Print(string.format("this client has no atlas %q; nothing changed", name))
+      return
+    elseif known == nil then
+      Print("this client cannot check atlas names: use a texture path; nothing changed")
+      return
+    end
+  end
+  db.roleicons[role] = name
+  Changed()
+  Print(string.format("icon %s: %s", role, name))
+end
+
 local function Slash(msg)
   msg = type(msg) == "string" and msg:gsub("^%s+", ""):gsub("%s+$", "") or ""
   local cmd, arg = msg:match("^(%S*)%s*(.-)$")
@@ -3283,6 +3375,8 @@ local function Slash(msg)
       return
     end
     Print("compact " .. (db.compact and "on" or "off"))
+  elseif cmd == "icon" or cmd == "icons" then
+    SlashIcon(arg)
   elseif cmd == "npcplates" then
     if arg == "" then
       local on = NpcPlates()

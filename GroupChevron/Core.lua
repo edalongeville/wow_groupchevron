@@ -617,6 +617,7 @@ function Core.InitDB(db)
     db.classcolor = Core.DEFAULT_CLASSCOLOR
   end
   db.npcroles = Core.CleanRoles(db.npcroles)
+  db.roleicons = Core.CleanRoleIcons(db.roleicons)
   return db
 end
 
@@ -816,8 +817,33 @@ Core.ROLES = {
 }
 
 -- ICON_CROP is the part of an Interface\Icons texture kept (SetTexCoord left, right, top,
--- bottom): its bevelled border is cut off.
+-- bottom): its bevelled border is cut off. Any other texture is shown whole (FULL_CROP).
 Core.ICON_CROP = { 0.07, 0.93, 0.07, 0.93 }
+Core.FULL_CROP = { 0, 1, 0, 1 }
+
+-- An icon is either a texture path (it has a "\" or a "/", e.g. Interface\Icons\INV_Misc_Coin_01)
+-- or the name of one of the client's atlases (e.g. FlightMaster). The player can choose the
+-- icon of each role (/gchev icon <role> <name>, saved in db.roleicons).
+
+-- IsTexturePath is true when name is a texture path rather than an atlas name.
+function Core.IsTexturePath(name)
+  return type(name) == "string" and name:find("[\\/]") ~= nil
+end
+
+-- ValidIconName is true for a texture path or atlas name: 1 to 200 letters, digits, "_", "-",
+-- ".", "\" or "/".
+function Core.ValidIconName(name)
+  return type(name) == "string" and #name >= 1 and #name <= 200 and name:match("^[%w_%-%.\\/]+$") ~= nil
+end
+
+-- IconCrop returns the SetTexCoord values of an icon: ICON_CROP for an Interface\Icons texture,
+-- else FULL_CROP.
+function Core.IconCrop(name)
+  if Core.IsTexturePath(name) and name:lower():gsub("/", "\\"):find("^interface\\icons\\") then
+    return Core.ICON_CROP
+  end
+  return Core.FULL_CROP
+end
 
 local rolePriority = {}
 for i, r in ipairs(Core.ROLES) do
@@ -912,6 +938,24 @@ function Core.NpcID(guid)
     return nil
   end
   return id
+end
+
+-- CleanRoleIcons returns the player's icon choices (role key -> icon name) with every invalid
+-- entry dropped: a new table when icons is not a table.
+function Core.CleanRoleIcons(icons)
+  if type(icons) ~= "table" then
+    return {}
+  end
+  local bad = {}
+  for role, name in pairs(icons) do
+    if not Core.ValidRole(role) or not Core.ValidIconName(name) then
+      bad[#bad + 1] = role
+    end
+  end
+  for _, role in ipairs(bad) do
+    icons[role] = nil
+  end
+  return icons
 end
 
 -- CleanRoles returns the learned roles table (creature ID -> role key) with every invalid entry
