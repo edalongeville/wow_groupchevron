@@ -1,6 +1,6 @@
 # GroupChevron
 
-A World of Warcraft addon (Interface 16001, WoW: Forever client) that makes the members of your party or raid easy to spot in a crowd. Standalone: no dependency on any other addon, nothing recorded or uploaded.
+A World of Warcraft addon (Interface 16001, WoW: Forever client) that makes the members of your party or raid easy to spot in a crowd. Standalone: no dependency on any other addon, nothing uploaded. Besides its settings, the only thing it saves is the role of the NPCs whose windows you open (see Service NPCs below).
 
 ## Features
 
@@ -16,6 +16,8 @@ The addon is still being tested.
 - Changes the nameplate font
 - Colors names by class
 - Displays friendlies' (non-grouped players') health bars only when below 100%
+- Shows every friendly player's guild on a second line below the name ("<Guild name>"), in the name's colour
+- Friendly NPCs (**Friendly NPCs** section of the options): a role icon above flight masters, innkeepers, bankers, auctioneers, stable masters, class and profession trainers, repairers and vendors (`/gchev npcicons on|off`, `/gchev npciconsize 1-15`, default 5), "<name> (<level>)" in the game's reaction colour (green friendly, yellow neutral) with the NPC's subtitle on a line below it ("<Maître des gryphons>"), every friendly NPC's plate down to that, with the health bar only while hurt, the target included (`/gchev npccompact on|off`, on by default), their name's text size (`/gchev npcsize 1-3`) and height (`/gchev npcnamegap -10-40`, default 5). All of it needs the game's friendly NPC nameplates: `/gchev npcplates on` (or the first checkbox of that section) turns them on; the addon never changes that setting by itself. The role comes from the windows an NPC opens for you (learned once, then shown on every visit) and, on English and French clients, from its subtitle ("<Gryphon Master>", "<Maître des gryphons>"). `/gchev icon` lists the icon of each role, and `/gchev icon <role> <texture or atlas>` changes one (an atlas name is checked against the client; `default` gives the role its own icon back)
 
 ## Layout
 
@@ -48,6 +50,16 @@ python3 tools/preview_backdrop_tga.py GroupChevron/backdrop.tga
 Bump `## Version` in `GroupChevron/GroupChevron.toc` with every change to the addon (patch for fixes, minor for features).
 
 To release, run **Actions -> Release -> Run workflow** on main: it releases the `## Version` already committed in the `.toc` (nothing to choose) and fails if that version has already been released. "Dry run" only checks and tests.
+
+## Shipped NPC roles
+
+`GroupChevron/NpcRoles.lua` holds the friendly NPC roles shipped with the addon (creature ID -> role), so NPCs get their icon before anyone opens their window. To add the roles learned in game, close the game, then from the repository root:
+
+```bash
+python3 tools/npc_roles.py "<WoW>/_forever_/WTF/Account/<ACCOUNT>/SavedVariables/GroupChevron.lua"
+```
+
+Several files can be given at once (other accounts, other players). Their roles are merged into `NpcRoles.lua`; when two disagree, the better role wins, in the order of `Core.ROLES`. Never edit `NpcRoles.lua` by hand: CI checks it is in the generated form (`python3 tools/npc_roles.py --check`). Commit it with a `## Version` bump like any change to the addon.
 
 ## Disclaimer
 

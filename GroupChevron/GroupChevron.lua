@@ -16,6 +16,13 @@
 -- A hostile (attackable) unit tied to one of the player's active quests (C_QuestLog.UnitIsRelatedToActiveQuest:
 -- kill, item drop, ...) gets its name in the hostile colour (default #FFFF00) and a single "V"
 -- chevron above it, in that colour; the rest of its plate is left as Blizzard draws it.
+-- Friendly NPCs: with npcicons on (default), one with a role (flight master, innkeeper, banker,
+-- auctioneer, stable master, trainer, repairer, vendor) gets the role's icon above its name; with
+-- npccompact on (default) every friendly NPC's plate shows the name only; npcsize sizes their
+-- name. The role comes from the windows the NPC opened for you (learned by creature ID, kept in
+-- GroupChevronDB.npcroles) and, on enUS and frFR clients, from its subtitle ("<Gryphon Master>").
+-- Friendly NPC plates are a game setting (/gchev npcplates on|off sets it; the addon never changes
+-- it by itself).
 --
 -- Robustness rules (fully independent of any other addon):
 --   * Every event handler, hook and slash command runs through SafeCall (pcall): an error
@@ -62,6 +69,7 @@ local V_HEIGHT = 5
 local STEP = 4
 local LOWER_ALPHA = 0.5
 local GAP = 2 -- between the top of the name and the bottom of the chevron
+local SUBTITLE_GAP = 1 -- between the top of a friendly NPC's subtitle and the bottom of its name
 local CHEVRON_WIDTH = V_WIDTH
 local CHEVRON_HEIGHT = V_HEIGHT + STEP
 -- The hostiles' chevron is a single "V" (the upper one of the double chevron, fully opaque), as
@@ -92,6 +100,8 @@ local lastNameField -- the field name found on the last marked plate ("" = none 
 -- has its own frame and the other one is hidden.
 local chevrons = setmetatable({}, { __mode = "k" })
 local singles = setmetatable({}, { __mode = "k" })
+-- icons: UnitFrame -> the service NPC role icon frame (its child, created once, lazily).
+local icons = setmetatable({}, { __mode = "k" })
 -- marks: UnitFrame -> { fs = name FontString or nil, orig = Blizzard's { r, g, b, a } or nil,
 -- applied = our last { r, g, b } } while its plate is marked.
 local marks = setmetatable({}, { __mode = "k" })
@@ -226,6 +236,16 @@ local unitAPI = {
   UnitClass = UnitClass,
   GetClassColor = Field(C_ClassColor, "GetClassColor"),
   RAID_CLASS_COLORS = type(RAID_CLASS_COLORS) == "table" and RAID_CLASS_COLORS or nil,
+  -- Service NPCs: C_TooltipInfo.GetUnit(unit) (the subtitle is its second line) and GetLocale
+  -- (which subtitle words apply); unverified on the Forever client, missing = only the roles
+  -- learned from the windows NPCs open count.
+  GetTooltipUnit = Field(C_TooltipInfo, "GetUnit"),
+  GetLocale = GetLocale,
+  -- Friendly NPCs' name colour (green friendly, yellow neutral); unverified on the Forever client,
+  -- missing = Core.DEFAULT_NPC_COLOR.
+  UnitSelectionColor = UnitSelectionColor,
+  -- Players' guild line: GetGuildInfo(unit)'s guild name; missing = no guild line.
+  GetGuildInfo = GetGuildInfo,
   issecretvalue = issecretvalue,
 }
 
@@ -275,6 +295,7 @@ end
 -- FLAG_DEFAULTS are the saved on/off settings (besides enabled and compact) and their default.
 local FLAG_DEFAULTS = {
   friendchevron = true, bnetfriends = true, guildchevron = true, classcolor = Core.DEFAULT_CLASSCOLOR, showlevel = true,
+  npcicons = true, npccompact = true,
 }
 
 -- Flag returns a saved boolean setting of FLAG_DEFAULTS (its default when missing or invalid).
@@ -560,6 +581,107 @@ local function HideChevrons(plate, keep)
 end
 
 -- ---------------------------------------------------------------------------------------
+-- Service NPC role icon: one texture in its own frame, a child of the plate's UnitFrame (it fades
+-- and hides with the plate), ICON_SIZE x ICON_SIZE UI units at npciconsize 1.
+
+local ICON_SIZE = 6
+
+-- GetIcon returns the plate's role icon frame, creating it on first use (nil without CreateFrame).
+local function GetIcon(plate, uf)
+  local frame = icons[plate]
+  if frame then
+    return frame
+  end
+  if type(CreateFrame) ~= "function" then
+    return nil
+  end
+  frame = CreateFrame("Frame", nil, uf)
+  frame.tex = frame:CreateTexture(nil, "OVERLAY")
+  Method(frame.tex, "SetAllPoints", frame)
+  frame:Hide()
+  icons[plate] = frame
+  return frame
+end
+
+-- IconName returns the icon of role: the player's choice (db.roleicons), else Core.RoleIcon.
+local function IconName(role)
+  local chosen = type(db) == "table" and type(db.roleicons) == "table" and db.roleicons[role]
+  if Core.ValidIconName(chosen) then
+    return chosen
+  end
+  return Core.RoleIcon(role)
+end
+
+-- AtlasKnown returns true or false when the client says whether it has the atlas name
+-- (C_Texture.GetAtlasInfo), or nil when it cannot tell.
+local function AtlasKnown(name)
+  local get = Field(C_Texture, "GetAtlasInfo")
+  if type(get) ~= "function" then
+    return nil
+  end
+  local ok, info = pcall(get, name)
+  if not ok then
+    return nil
+  end
+  return Readable(info) ~= nil
+end
+
+-- SetIconTexture puts the icon name (a texture path or an atlas name) on tex. It returns false
+-- when the client cannot load it (an unknown atlas, a texture that does not load).
+local function SetIconTexture(tex, name)
+  if Core.IsTexturePath(name) then
+    local ok, loaded = pcall(tex.SetTexture, tex, name)
+    if not ok or loaded == false then
+      return false
+    end
+    local crop = Core.IconCrop(name)
+    Method(tex, "SetTexCoord", crop[1], crop[2], crop[3], crop[4])
+    return true
+  end
+  if AtlasKnown(name) == false or type(Field(tex, "SetAtlas")) ~= "function" then
+    return false
+  end
+  local ok, loaded = pcall(tex.SetAtlas, tex, name)
+  return ok and loaded ~= false
+end
+
+-- ShowIcon shows role's icon on the plate, its bottom GAP above anchor (else above uf). It returns
+-- false (and hides the icon) when the role has no icon or the client cannot load its texture.
+local function ShowIcon(plate, uf, anchor, role)
+  local path = IconName(role)
+  local frame = path and GetIcon(plate, uf)
+  if not frame then
+    return false
+  end
+  if frame.path ~= path then
+    if not SetIconTexture(frame.tex, path) then
+      frame.path = nil
+      frame:Hide()
+      NoticeOnce("noicon:" .. path, "friendly NPC icon not found (" .. path .. "): no icon is shown; "
+        .. "/gchev icon " .. tostring(role) .. " <texture or atlas> picks another one")
+      return false
+    end
+    frame.path = path
+  end
+  local size = ICON_SIZE * Factor("npciconsize")
+  frame:SetSize(size, size)
+  frame:ClearAllPoints()
+  frame:SetPoint("BOTTOM", anchor or uf, "TOP", 0, GAP)
+  frame.role = role
+  frame:Show()
+  return true
+end
+
+-- HideIcon hides the plate's role icon.
+local function HideIcon(plate)
+  local frame = icons[plate]
+  if frame then
+    frame.role = nil
+    frame:Hide()
+  end
+end
+
+-- ---------------------------------------------------------------------------------------
 -- Full name: our own FontString over Blizzard's, so the name is never cut to the bar width.
 
 -- Blizzard's name FontString lives on a pooled UnitFrame, so a name we faded travels to the
@@ -659,7 +781,7 @@ end
 -- changed. It returns
 -- our FontString (the chevron's anchor), or nil when the name stays Blizzard's (text or font
 -- unreadable, no CreateFrame, or fs not shown).
-local function ShowFullName(plate, uf, fs, size, r, g, b, lift, gap, level)
+local function ShowFullName(plate, uf, fs, size, r, g, b, lift, gap, level, subtitle)
   local plain = NameText(fs)
   local text = plain
   if text and level then
@@ -736,6 +858,33 @@ local function ShowFullName(plate, uf, fs, size, r, g, b, lift, gap, level)
   end
   -- FollowBar's texts: the name with the level (nil without a level) and the name alone.
   rec.full, rec.plain = text ~= plain and text or nil, plain
+  -- A second line below the name (a friendly NPC's "<subtitle>", a player's "<guild>"), where
+  -- Blizzard's name was, with our name moved on top of it; nil: none, the name where it was.
+  if subtitle then
+    if not rec.sub then
+      rec.sub = rec.frame:CreateFontString(nil, "OVERLAY")
+      Method(rec.sub, "SetWordWrap", false)
+      Method(rec.sub, "SetJustifyH", "CENTER")
+    end
+    local sub = rec.sub
+    if fontObject then
+      sub:SetFontObject(fontObject)
+    else
+      sub:SetFont(base[1], base[2], base[3])
+    end
+    sub:SetTextColor(r, g, b, 1)
+    sub:SetText(subtitle)
+    sub:ClearAllPoints()
+    sub:SetPoint("BOTTOM", fs, "BOTTOM", 0, Core.NameOffset(lift, gap, size))
+    for _, l in ipairs({ rec.text, rec.short }) do
+      l:ClearAllPoints()
+      l:SetPoint("BOTTOM", sub, "TOP", 0, SUBTITLE_GAP)
+    end
+    Method(sub, "SetAlpha", 1)
+    sub:Show()
+  elseif rec.sub then
+    rec.sub:Hide()
+  end
   rec.name = fs
   FadeName(fs)
   rec.frame:Show()
@@ -981,7 +1130,7 @@ local function FriendStyle(compact, level)
     r = r, g = g, b = b,
     chevron = Flag("friendchevron"),
     outlinesize = Factor("friendoutlinesize"), chevsize = "friendchevsize",
-    size = OtherFactor("othersize"),
+    size = Factor("friendsize"),
     bar = not compact and OtherFactor("otherbarsize") or nil,
     scales = false,
     level = level,
@@ -996,7 +1145,7 @@ local function GuildStyle(compact, level)
     kind = compact and "guildcompact" or "guild",
     r = r, g = g, b = b,
     chevron = Flag("guildchevron"), outlinesize = Factor("guildoutlinesize"), chevsize = "guildchevsize",
-    size = OtherFactor("othersize"),
+    size = Factor("guildsize"),
     bar = not compact and OtherFactor("otherbarsize") or nil,
     scales = false,
     level = level,
@@ -1031,6 +1180,19 @@ local function HostileStyle()
   }
 end
 
+-- NpcStyle is the look of a friendly NPC: "<name> (<level>)" in the colour c ({ r, g, b }: the
+-- game's reaction colour, Core.ReactionColor), at npcsize and npcnamegap, the level always shown
+-- (keeplevel; level nil: not readable, the name alone), its subtitle on a line below the name, in
+-- angle brackets like the game's own ("<Maître des gryphons>"; nil: none), and, when it has a role
+-- (nil: none), the role's icon above the name (npciconsize).
+local function NpcStyle(role, compact, level, subtitle, c)
+  return {
+    kind = compact and "npccompact" or "npc", r = c[1], g = c[2], b = c[3], chevron = false, icon = role,
+    size = Factor("npcsize"), scales = false, gap = Gap("npcnamegap"), level = level, keeplevel = true,
+    subtitle = subtitle and ("<" .. subtitle .. ">") or nil,
+  }
+end
+
 -- RelationStyle returns the style of a friend or guildmate plate.
 local function RelationStyle(relation, compact, level)
   if relation == "guild" then
@@ -1056,7 +1218,20 @@ local function Mark(plate, uf, style)
   end
   m.kind = style.kind
   local r, g, b = style.r, style.g, style.b
-  if fs then
+  if fs and style.keepcolor then
+    -- The name keeps Blizzard's colour (service NPCs): a colour we applied for an earlier style is
+    -- given back first, and our own name is drawn in Blizzard's colour.
+    local cur = ReadColor(fs)
+    local mine = m.applied and cur and SameColor(cur[1], cur[2], cur[3], m.applied[1], m.applied[2], m.applied[3])
+    if mine and m.orig then
+      ApplyColor(fs, m.orig[1], m.orig[2], m.orig[3])
+      cur = m.orig
+    end
+    m.applied = nil
+    if cur then
+      r, g, b = cur[1], cur[2], cur[3]
+    end
+  elseif fs then
     -- The colour to restore later is Blizzard's: a colour that is still the one we applied
     -- last is ours, not Blizzard's.
     local cur = ReadColor(fs)
@@ -1066,14 +1241,21 @@ local function Mark(plate, uf, style)
     end
     m.applied = { r, g, b }
     ApplyColor(fs, r, g, b)
-  elseif style.chevron then
+  elseif style.chevron or style.icon then
     NoticeOnce("noname", "name text not found on the nameplate (tried UnitFrame.name, .Name, .unitName): "
       .. "only the chevron is shown")
   end
   local anchor = fs
-  if fs then
+  if fs and type(r) == "number" then
     local lift = style.scales and BuffLift(plate, uf) or 0
-    anchor = ShowFullName(plate, uf, fs, style.size, r, g, b, lift, style.gap, style.level) or fs
+    anchor = ShowFullName(plate, uf, fs, style.size, r, g, b, lift, style.gap, style.level, style.subtitle) or fs
+  elseif fs then
+    -- Blizzard's colour cannot be read: Blizzard's name stays as it is.
+    HideFullName(plate)
+  end
+  local rec = labels[plate]
+  if rec then
+    rec.keepLevel = style.keeplevel and true or nil
   end
   local chevron = style.chevron and GetChevron(plate, uf, style.single) or nil
   if chevron then
@@ -1090,6 +1272,10 @@ local function Mark(plate, uf, style)
   end
   -- A pooled UnitFrame may carry the other shape from its previous plate.
   HideChevrons(plate, chevron)
+  -- The service NPCs' role icon, above the name like a chevron (never both).
+  if not (style.icon and ShowIcon(plate, uf, anchor, style.icon)) then
+    HideIcon(plate)
+  end
   if style.scales then
     ScaleBar(plate, uf, BarPart(uf), Factor("barsize"))
     ScalePart(plate, AuraPart(uf), Factor("buffsize"))
@@ -1105,6 +1291,7 @@ end
 -- will colour), the colour is left alone.
 local function Unmark(plate, restore)
   HideChevrons(plate, nil)
+  HideIcon(plate)
   HideFullName(plate)
   if marks[plate] then
     RestoreScales(plate)
@@ -1194,7 +1381,8 @@ end
 -- text is chosen from hurt. Only our own FontStrings are touched, never Blizzard's name.
 local function FollowBar(plate, unit, curve, alpha, barDriven, hurt)
   local rec = labels[plate]
-  if not rec or not rec.full or not rec.short then
+  if not rec or not rec.full or not rec.short or rec.keepLevel then
+    -- Friendly NPCs (keepLevel) always show "<name> (<level>)", as ShowFullName drew it.
     return
   end
   local mode = Core.LevelSuffix(curve and true or false, barDriven, hurt)
@@ -1256,7 +1444,7 @@ local function CompactParts(plate, uf, showHealth)
   if chain[#chain] ~= uf then
     return nil
   end
-  for _, cache in ipairs({ chevrons, singles }) do
+  for _, cache in ipairs({ chevrons, singles, icons }) do
     if cache[plate] then
       keep[cache[plate]] = true
     end
@@ -1339,8 +1527,10 @@ end
 -- A friend's plate is marked (Mark, friend colour and chevron) before it is compacted: its name
 -- is then already ours, and stays so (the plate keeps the friend look) when compact cannot
 -- apply. level is the level shown after the name of an unmarked plate (see Level), or nil; on
--- any compact plate, FollowBar then drops the suffix while the health bar is shown.
-local function Compact(plate, uf, unit, level)
+-- any compact plate, FollowBar then drops the suffix while the health bar is shown. bar is the
+-- health bar's size (default otherbarsize, the friendlies'; service NPCs keep Blizzard's).
+-- subtitle is the second line of an unmarked plate's name (a player's "<guild>"), or nil.
+local function Compact(plate, uf, unit, level, bar, subtitle)
   local curve, alpha = HealthAlpha(unit)
   local hurt = not curve and Core.HealthMissing(unitAPI, unit)
   local marked = marks[plate] ~= nil
@@ -1349,7 +1539,7 @@ local function Compact(plate, uf, unit, level)
   if fs and not marked then
     local c = ReadColor(fs)
     if c then
-      ShowFullName(plate, uf, fs, Factor("othersize"), c[1], c[2], c[3], 0, Gap("othernamegap"), level)
+      ShowFullName(plate, uf, fs, Factor("othersize"), c[1], c[2], c[3], 0, Gap("othernamegap"), level, subtitle)
     else
       HideFullName(plate)
     end
@@ -1364,7 +1554,7 @@ local function Compact(plate, uf, unit, level)
     end
     return
   end
-  ScaleBar(plate, uf, BarPart(uf), Factor("otherbarsize"))
+  ScaleBar(plate, uf, BarPart(uf), bar or Factor("otherbarsize"))
   local rec = hidden[plate]
   if not rec then
     rec = { set = {}, list = {}, drive = {} }
@@ -1450,11 +1640,11 @@ end
 -- own FontString so it can be sized and moved; the rest of the plate stays Blizzard's. No level:
 -- the full plate's health bar shows Blizzard's. Without a readable colour, Blizzard's name stays
 -- as it is (size 1).
-local function ShowOtherName(uf, size)
+local function ShowOtherName(uf, size, subtitle)
   local fs = FindName(uf)
   local c = fs and ReadColor(fs)
   if c then
-    ShowFullName(uf, uf, fs, size, c[1], c[2], c[3], 0, Gap("othernamegap"))
+    ShowFullName(uf, uf, fs, size, c[1], c[2], c[3], 0, Gap("othernamegap"), nil, subtitle)
   else
     HideFullName(uf)
   end
@@ -1465,15 +1655,16 @@ end
 -- only when the size is not 1 or the gap is not 0, else Blizzard's name stays; never with the
 -- level, which Blizzard's health bar shows), the health bar at
 -- otherbarsize. Any other plate (enemies, NPCs, unknown) gets its original scales back, so a
--- pooled UnitFrame never keeps a friendly's bar size.
-local function DefaultFullPlate(uf, info)
+-- pooled UnitFrame never keeps a friendly's bar size. subtitle (the player's "<guild>") is drawn
+-- below the name, which then is always ours.
+local function DefaultFullPlate(uf, info, subtitle)
   if not Core.OtherSizes(info, ModeSettings()) then
     RestoreScales(uf)
     return
   end
   local size = OtherFactor("othersize")
-  if size ~= Core.DEFAULT_FACTOR or Gap("othernamegap") ~= Core.NO_GAP then
-    ShowOtherName(uf, size)
+  if size ~= Core.DEFAULT_FACTOR or Gap("othernamegap") ~= Core.NO_GAP or subtitle then
+    ShowOtherName(uf, size, subtitle)
   end
   local bar = OtherFactor("otherbarsize")
   if bar ~= Core.DEFAULT_FACTOR then
@@ -1483,6 +1674,22 @@ local function DefaultFullPlate(uf, info)
   end
 end
 
+-- GuildLine returns "<guild>", the second line of a player's name (Core.GuildName), or nil (not
+-- a player, no guild, or the guild cannot be read).
+local function GuildLine(unit, info)
+  if type(info) ~= "table" or info.player ~= true then
+    return nil
+  end
+  local name = Core.GuildName(unitAPI, unit)
+  return name and ("<" .. name .. ">") or nil
+end
+
+-- WithGuild sets style's second line to guild ("<guild>" or nil) and returns style.
+local function WithGuild(style, guild)
+  style.subtitle = guild
+  return style
+end
+
 -- Apply gives the UnitFrame uf (both the key of the records and the frame) the mode of unit.
 -- restore is passed to Unmark: false when uf may now show another unit, whose colour Blizzard
 -- has set or will set (never restore an older colour over it).
@@ -1490,36 +1697,52 @@ local function Apply(uf, unit, restore)
   local mode, relation, info = Mode(unit)
   local class = Core.NameColor(info, ModeSettings(), relation) == "class"
   local level = Level(unit, info)
+  -- Players get their guild on a second line, whatever their look.
+  local guild = GuildLine(unit, info)
   if mode == "member" then
     Uncompact(uf)
-    Mark(uf, uf, MemberStyle())
+    Mark(uf, uf, WithGuild(MemberStyle(), guild))
   elseif mode == "quest" then
     -- A hostile unit tied to a quest: full plate, our name and single chevron in the hostile colour.
     Uncompact(uf)
     Mark(uf, uf, HostileStyle())
+  elseif mode == "npc" then
+    -- A friendly NPC: "<name> (<level>)", its subtitle below, the role icon above when it has one
+    -- (and npcicons is on); with npccompact, the health bar only while hurt, the target included.
+    local compact = Flag("npccompact")
+    local role = Core.ServiceNPC(info, ModeSettings()) and info.service or nil
+    local npcLevel = Core.UnitLevel(unitAPI, unit)
+    local subtitle = Core.SubtitleLine(Core.TooltipSubtitle(unitAPI, unit), npcLevel)
+    local r, g, b = Core.ReactionColor(unitAPI, unit)
+    Mark(uf, uf, NpcStyle(role, compact, npcLevel, subtitle, r and { r, g, b } or Core.DEFAULT_NPC_COLOR))
+    if compact then
+      Compact(uf, uf, unit, nil, Core.DEFAULT_FACTOR)
+    else
+      Uncompact(uf)
+    end
   elseif mode == "friend" then
     -- Full plates never get the level: Blizzard's health bar shows it.
     Uncompact(uf)
-    Mark(uf, uf, RelationStyle(relation, false))
+    Mark(uf, uf, WithGuild(RelationStyle(relation, false), guild))
   elseif mode == "class" then
     Uncompact(uf)
-    Mark(uf, uf, ClassStyle(info.classColor, false))
+    Mark(uf, uf, WithGuild(ClassStyle(info.classColor, false), guild))
   elseif mode == "compact" and (relation == "friend" or relation == "guild") then
     -- Compact plates: the level, which Compact (FollowBar) drops while the health bar shows.
-    Mark(uf, uf, RelationStyle(relation, true, level))
+    Mark(uf, uf, WithGuild(RelationStyle(relation, true, level), guild))
     Compact(uf, uf, unit)
   elseif mode == "compact" and class then
-    Mark(uf, uf, ClassStyle(info.classColor, true, level))
+    Mark(uf, uf, WithGuild(ClassStyle(info.classColor, true, level), guild))
     Compact(uf, uf, unit)
   elseif mode == "compact" then
     Unmark(uf, restore)
-    Compact(uf, uf, unit, level)
+    Compact(uf, uf, unit, level, nil, guild)
   else
     Unmark(uf, restore)
     Uncompact(uf)
     -- A friendly non-member's full plate (compact off, or the target): our name for othersize
     -- and othernamegap, otherbarsize on the health bar, never the level.
-    DefaultFullPlate(uf, info)
+    DefaultFullPlate(uf, info, guild)
   end
 end
 
@@ -1759,6 +1982,7 @@ local FACTOR_KINDS = {
   chevsize = true, textsize = true, othersize = true, barsize = true, buffsize = true, otherbarsize = true,
   hostilechevsize = true, hostilesize = true, friendchevsize = true, guildchevsize = true,
   memberoutlinesize = true, friendoutlinesize = true, guildoutlinesize = true, hostileoutlinesize = true,
+  npciconsize = true, npcsize = true, friendsize = true, guildsize = true,
 }
 
 -- SetFactor sets one of FACTOR_KINDS from a number (the panel's slider) or a
@@ -1823,34 +2047,73 @@ local function ResetColor()
   return true
 end
 
--- ResetAll puts every setting back to its default (the panel's button).
-local function ResetAll()
-  if type(db) ~= "table" then
+-- ResetPage puts the settings of one options page back to their defaults (its Reset button;
+-- Core.PAGE_KEYS: "main", "players", "quests" or "npcs"), and nothing else.
+local function ResetPage(page)
+  if not Core.ResetPage(db, page) then
     return false
   end
-  db.enabled = true
-  db.compact = true
-  db.color = Core.CopyDefaultColor()
-  db.friendcolor = Core.CopyDefaultFriendColor()
-  db.friendchevron = true
-  db.bnetfriends = true
-  db.guildcolor = Core.CopyDefaultGuildColor()
-  db.guildchevron = true
-  db.hostilecolor = Core.CopyDefaultHostileColor()
-  db.classcolor = Core.DEFAULT_CLASSCOLOR
-  db.showlevel = true
-  for _, key in ipairs({ "chevsize", "textsize", "othersize", "barsize", "buffsize", "otherbarsize",
-    "hostilechevsize", "hostilesize", "friendchevsize", "guildchevsize", "memberoutlinesize",
-    "friendoutlinesize", "guildoutlinesize", "hostileoutlinesize" }) do
-    db[key] = Core.DefaultFactor(key)
-  end
-  for _, key in ipairs({ "namegap", "othernamegap", "hostilenamegap" }) do
-    db[key] = Core.DefaultGap(key)
-  end
-  db.font = Core.DEFAULT_FONT
   Changed()
   return true
 end
+
+-- Friendly NPC nameplates: a game setting (the CVar below, unverified on the Forever client). The
+-- service NPC icons need it on, but the addon only changes it when asked (/gchev npcplates, the
+-- options panel), never by itself; it is not saved in GroupChevronDB.
+local NPC_PLATES_CVAR = "nameplateShowFriendlyNPCs"
+
+-- NpcPlates returns true or false for the friendly NPC nameplates setting, or nil when the client
+-- does not have it (or it cannot be read).
+local function NpcPlates()
+  local value
+  if type(C_CVar) == "table" then
+    value = Try(C_CVar.GetCVar, NPC_PLATES_CVAR)
+  end
+  if value == nil then
+    value = Try(GetCVar, NPC_PLATES_CVAR)
+  end
+  if value == "1" then
+    return true
+  elseif value == "0" then
+    return false
+  end
+  return nil
+end
+
+-- SetNpcPlates turns the friendly NPC nameplates on or off (true/false or "on"/"off"). It returns
+-- true, or false and why: "invalid", "combat" (the game refuses it in combat), "missing" (no such
+-- setting on this client) or "failed" (the client refused the change).
+local function SetNpcPlates(value)
+  if type(value) == "string" then
+    value = Core.ParseOnOff(value)
+  end
+  if type(value) ~= "boolean" then
+    return false, "invalid"
+  end
+  if Try(InCombatLockdown) == true then
+    return false, "combat"
+  end
+  if NpcPlates() == nil then
+    return false, "missing"
+  end
+  local set = Field(C_CVar, "SetCVar")
+  if type(set) ~= "function" then
+    set = SetCVar
+  end
+  if type(set) ~= "function" or not pcall(set, NPC_PLATES_CVAR, value and "1" or "0") or NpcPlates() ~= value then
+    return false, "failed"
+  end
+  Changed()
+  return true
+end
+
+-- NPC_PLATES_REFUSED are the messages of SetNpcPlates's refusals.
+local NPC_PLATES_REFUSED = {
+  invalid = "use /gchev npcplates on or /gchev npcplates off",
+  combat = "the game does not allow it in combat: try again out of combat",
+  missing = "this client has no friendly NPC nameplates setting (" .. NPC_PLATES_CVAR .. ")",
+  failed = "the client refused the change",
+}
 
 -- ---------------------------------------------------------------------------------------
 -- Options panel (Options -> AddOns -> GroupChevron). Plain widgets on our own canvas, shown
@@ -1877,18 +2140,36 @@ local function BuildPanel()
     or type(Settings.RegisterAddOnCategory) ~= "function" or type(CreateFrame) ~= "function" then
     return
   end
-  local panel = CreateFrame("Frame", nil, nil)
-  panel.name = "GroupChevron"
   local refreshing = false -- true while the controls are set from the saved values
 
-  -- The content is taller than the Settings window: it lives in a scroll frame (scroll bar on
-  -- the right, 28 px margin) and every widget below is a child of `content`.
-  local scroll = CreateFrame("ScrollFrame", nil, panel, "UIPanelScrollFrameTemplate")
-  scroll:SetPoint("TOPLEFT", panel, "TOPLEFT", 0, -4)
-  scroll:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -28, 4)
-  local content = CreateFrame("Frame", nil, scroll)
-  content:SetSize(600, 1040)
-  scroll:SetScrollChild(content)
+  -- The options are split into pages, like the Settings sub-categories of other addons: the
+  -- GroupChevron category itself (a title and a hint) and its sub-categories Main, Friendly
+  -- players, Quest mobs and NPCs. Each page is a scroll frame (scroll bar on the right, 28 px
+  -- margin) whose child frame holds its widgets; `content` is the page the widgets below are
+  -- created on (the helpers read it when they are called), switched before each section. Every
+  -- page refreshes all the controls when it is shown.
+  local content
+  local function NewPage(title, height)
+    local panel = CreateFrame("Frame", nil, nil)
+    panel.name = title
+    local scroll = CreateFrame("ScrollFrame", nil, panel, "UIPanelScrollFrameTemplate")
+    scroll:SetPoint("TOPLEFT", panel, "TOPLEFT", 0, -4)
+    scroll:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -28, 4)
+    local child = CreateFrame("Frame", nil, scroll)
+    child:SetSize(600, height)
+    scroll:SetScrollChild(child)
+    panel:SetScript("OnShow", function()
+      SafeCall("options panel show", RefreshPanel)
+    end)
+    return { panel = panel, content = child, title = title }
+  end
+  local pages = {
+    root = NewPage("GroupChevron", 120),
+    main = NewPage(L("page_main"), 140),
+    players = NewPage(L("page_players"), 1090),
+    quests = NewPage(L("page_quests"), 340),
+    npcs = NewPage(L("page_npcs"), 340),
+  }
 
   local function Label(text, x, y, template)
     local fs = content:CreateFontString(nil, "ARTWORK", template or "GameFontHighlight")
@@ -1897,7 +2178,13 @@ local function BuildPanel()
     return fs
   end
 
-  Label("GroupChevron", 16, -16, "GameFontNormalLarge")
+  -- Page titles: "GroupChevron" on the category, "GroupChevron - <page>" on each sub-category.
+  for _, key in ipairs({ "root", "main", "players", "quests", "npcs" }) do
+    content = pages[key].content
+    Label(key == "root" and "GroupChevron" or ("GroupChevron - " .. pages[key].title), 16, -16, "GameFontNormalLarge")
+  end
+  content = pages.root.content
+  Label(L("choose_section"), 16, -52)
 
   local function Checkbox(text, y, onClick, x)
     x = x or 16
@@ -1996,10 +2283,11 @@ local function BuildPanel()
     return Label(title, 16, y - 8, "GameFontNormal")
   end
 
-  Group(L("group_members"), -84, 312)
-  Group(L("friendlies"), -1032, 190)
-  Group(L("friends"), -406, 182)
-  Group(L("guildmates"), -598, 182)
+  content = pages.players.content
+  Group(L("group_members"), -48, 312)
+  Group(L("friendlies"), -840, 190)
+  Group(L("friends"), -370, 222)
+  Group(L("guildmates"), -602, 222)
 
   -- Layout: Enabled, then the "Group members" settings, then the "Friends" ones (friends list,
   -- outside the group), then the "Guildmates" ones (in your guild, outside the group), then the
@@ -2008,12 +2296,14 @@ local function BuildPanel()
   -- The specs find widgets by creation order, so the
   -- Friends widgets, then the guild chevron checkbox, then the class colour checkbox, then the
   -- Hostiles group and finally the name font control are created last.
+  content = pages.main.content
   local enabledBox = Checkbox(L("enabled"), -48, SetEnabled)
-  local compactBox = Checkbox(L("compact"), -1064, SetCompact)
+  content = pages.players.content
+  local compactBox = Checkbox(L("compact"), -872, SetCompact)
 
   -- Name colour: a swatch that opens the colour picker (live apply, Cancel restores).
-  Label(L("name_colour"), 16, -124)
-  local fill = Swatch(-118, Color, SetColor, "color")
+  Label(L("name_colour"), 16, -88)
+  local fill = Swatch(-82, Color, SetColor, "color")
 
   -- Sliders: the value label follows the drag, the setting is applied on release (or at once
   -- when changed without dragging, e.g. the mouse wheel), so a drag does not spam RefreshAll.
@@ -2082,42 +2372,49 @@ local function BuildPanel()
 
   -- Created in this order (the specs find sliders by creation order); placed by section.
   local sliders = {
-    { "chevsize", Slider(L("chevron_size"), -204, "chevsize") },
-    { "textsize", Slider(L("text_size"), -244, "textsize") },
-    { "othersize", Slider(L("text_size"), -1106, "othersize") },
-    { "barsize", Slider(L("bar_size"), -284, "barsize") },
-    { "buffsize", Slider(L("buffs_size"), -324, "buffsize") },
-    { "otherbarsize", Slider(L("bar_size"), -1146, "otherbarsize") },
-    { "namegap", Slider(L("name_gap"), -364, "namegap") },
-    { "othernamegap", Slider(L("name_gap"), -1186, "othernamegap") },
-    { "memberoutlinesize", Slider(L("outline_size"), -164, "memberoutlinesize", OUTLINE_GEOMETRY) },
-    { "friendoutlinesize", Slider(L("outline_size"), -486, "friendoutlinesize", OUTLINE_GEOMETRY) },
-    { "guildoutlinesize", Slider(L("outline_size"), -678, "guildoutlinesize", OUTLINE_GEOMETRY) },
+    { "chevsize", Slider(L("chevron_size"), -168, "chevsize") },
+    { "textsize", Slider(L("text_size"), -208, "textsize") },
+    { "othersize", Slider(L("text_size"), -914, "othersize") },
+    { "barsize", Slider(L("bar_size"), -248, "barsize") },
+    { "buffsize", Slider(L("buffs_size"), -288, "buffsize") },
+    { "otherbarsize", Slider(L("bar_size"), -954, "otherbarsize") },
+    { "namegap", Slider(L("name_gap"), -328, "namegap") },
+    { "othernamegap", Slider(L("name_gap"), -994, "othernamegap") },
+    { "memberoutlinesize", Slider(L("outline_size"), -128, "memberoutlinesize", OUTLINE_GEOMETRY) },
+    { "friendoutlinesize", Slider(L("outline_size"), -450, "friendoutlinesize", OUTLINE_GEOMETRY) },
+    { "guildoutlinesize", Slider(L("outline_size"), -682, "guildoutlinesize", OUTLINE_GEOMETRY) },
   }
 
-  local reset = CreateFrame("Button", nil, content, "UIPanelButtonTemplate")
-  reset:SetSize(160, 24)
-  reset:SetPoint("TOPLEFT", content, "TOPLEFT", 16, -1238)
-  reset:SetText(L("reset"))
-  reset:SetScript("OnClick", function()
-    SafeCall("options reset", ResetAll)
-  end)
+  -- ResetButton adds, at y on the current page, a Reset button that resets that page only.
+  local function ResetButton(y, key)
+    local button = CreateFrame("Button", nil, content, "UIPanelButtonTemplate")
+    button:SetSize(160, 24)
+    button:SetPoint("TOPLEFT", content, "TOPLEFT", 16, y)
+    button:SetText(L("reset"))
+    button:SetScript("OnClick", function()
+      SafeCall("options reset", ResetPage, key)
+    end)
+    return button
+  end
+  content = pages.main.content
+  ResetButton(-96, "main")
 
   -- Friends (on your friends list, outside your group).
-  Label(L("name_colour"), 16, -446)
-  local friendFill = Swatch(-440, FriendColor, SetFriendColor, "friendcolor")
-  local friendChevronBox = Checkbox(L("show_chevron"), -548, function(v) SetFlag("friendchevron", v) end)
-  local bnetBox = Checkbox(L("bnet_friends"), -548, function(v) SetFlag("bnetfriends", v) end, 200)
+  content = pages.players.content
+  Label(L("name_colour"), 16, -410)
+  local friendFill = Swatch(-404, FriendColor, SetFriendColor, "friendcolor")
+  local friendChevronBox = Checkbox(L("show_chevron"), -552, function(v) SetFlag("friendchevron", v) end)
+  local bnetBox = Checkbox(L("bnet_friends"), -552, function(v) SetFlag("bnetfriends", v) end, 200)
 
   -- Guildmates (in your guild, outside your group, not on your friends list).
-  Label(L("name_colour"), 16, -638)
-  local guildFill = Swatch(-632, GuildColor, SetGuildColor, "guildcolor")
-  local guildChevronBox = Checkbox(L("show_chevron"), -740, function(v) SetFlag("guildchevron", v) end)
+  Label(L("name_colour"), 16, -642)
+  local guildFill = Swatch(-636, GuildColor, SetGuildColor, "guildcolor")
+  local guildChevronBox = Checkbox(L("show_chevron"), -784, function(v) SetFlag("guildchevron", v) end)
 
   -- Friendlies: the class colour, beside "Compact plates".
-  local classBox = Checkbox(L("class_colour"), -1064, function(v) SetFlag("classcolor", v) end, 260)
+  local classBox = Checkbox(L("class_colour"), -872, function(v) SetFlag("classcolor", v) end, 260)
   -- Friendlies: show level, beside "Class colour" (created last, see above).
-  local levelBox = Checkbox(L("show_level"), -1064, function(v) SetFlag("showlevel", v) end, 440)
+  local levelBox = Checkbox(L("show_level"), -872, function(v) SetFlag("showlevel", v) end, 440)
 
   -- Live chevron previews beside the colour swatches: the same texture, tinted with the chosen colour,
   -- with the black outline of the section's thickness (none at 0). Textures of the content frame (no
@@ -2134,7 +2431,9 @@ local function BuildPanel()
     local squareTop = swatchY + 6
     -- A grey rounded square, so that the colour and the black outline both stand out (a plain
     -- square when the client cannot load the texture).
-    local backdrop = content:CreateTexture(nil, "BACKGROUND")
+    -- The page this preview is on: `content` moves on to other pages before Update runs.
+    local page = content
+    local backdrop = page:CreateTexture(nil, "BACKGROUND")
     local ok, loaded = pcall(backdrop.SetTexture, backdrop, BACKDROP_TEXTURE)
     if ok and loaded ~= false then
       backdrop:SetVertexColor(0.62, 0.62, 0.62, 1)
@@ -2142,9 +2441,9 @@ local function BuildPanel()
       backdrop:SetColorTexture(0.62, 0.62, 0.62, 1)
     end
     backdrop:SetSize(PREVIEW_SIZE, PREVIEW_SIZE)
-    backdrop:SetPoint("TOPLEFT", content, "TOPLEFT", PREVIEW_X, squareTop)
+    backdrop:SetPoint("TOPLEFT", page, "TOPLEFT", PREVIEW_X, squareTop)
     local function Add(step, alpha)
-      local v = content:CreateTexture(nil, "OVERLAY")
+      local v = page:CreateTexture(nil, "OVERLAY")
       local vok, vloaded = pcall(v.SetTexture, v, CHEVRON_TEXTURE)
       if not vok or vloaded == false then
         Method(v, "Hide")
@@ -2153,7 +2452,7 @@ local function BuildPanel()
       v:SetAlpha(alpha)
       local outlines = {}
       for _, dir in ipairs(OUTLINE_DIRS) do
-        local outline = content:CreateTexture(nil, "ARTWORK")
+        local outline = page:CreateTexture(nil, "ARTWORK")
         outline:SetTexture(CHEVRON_TEXTURE)
         outline:SetVertexColor(0, 0, 0, 1)
         outline:SetAlpha(alpha)
@@ -2177,7 +2476,7 @@ local function BuildPanel()
         item.v:SetVertexColor(r, g, b, 1)
         item.v:SetSize(V_WIDTH * f, V_HEIGHT * f)
         item.v:ClearAllPoints()
-        item.v:SetPoint("TOPLEFT", content, "TOPLEFT", left, top - item.step * f)
+        item.v:SetPoint("TOPLEFT", page, "TOPLEFT", left, top - item.step * f)
         for _, outline in ipairs(item.outlines) do
           outline:SetSize(V_WIDTH * f, V_HEIGHT * f)
           outline:ClearAllPoints()
@@ -2192,31 +2491,35 @@ local function BuildPanel()
     end
     previews[#previews + 1] = { thicknessKind = thicknessKind, sizeKind = sizeKind, update = Update }
   end
-  Preview(-118, false, Color, "memberoutlinesize", "chevsize")
-  Preview(-440, false, FriendColor, "friendoutlinesize", "friendchevsize")
-  Preview(-632, false, GuildColor, "guildoutlinesize", "guildchevsize")
+  Preview(-82, false, Color, "memberoutlinesize", "chevsize")
+  Preview(-404, false, FriendColor, "friendoutlinesize", "friendchevsize")
+  Preview(-636, false, GuildColor, "guildoutlinesize", "guildchevsize")
 
   -- Hostiles (enemies tied to one of your quests): name colour (name and chevron), then the
   -- chevron size, text size and name height sliders. Created after the other sections and
   -- before the font control, so the existing widgets keep their creation order.
-  Group(L("hostiles"), -790, 232)
-  Label(L("name_colour"), 16, -830)
-  local hostileFill = Swatch(-824, HostileColor, SetHostileColor, "hostilecolor")
-  sliders[#sliders + 1] = { "hostilechevsize", Slider(L("chevron_size"), -910, "hostilechevsize") }
-  sliders[#sliders + 1] = { "hostilesize", Slider(L("text_size"), -950, "hostilesize") }
-  sliders[#sliders + 1] = { "hostilenamegap", Slider(L("name_gap"), -990, "hostilenamegap") }
+  content = pages.quests.content
+  Group(L("hostiles"), -48, 232)
+  Label(L("name_colour"), 16, -88)
+  local hostileFill = Swatch(-82, HostileColor, SetHostileColor, "hostilecolor")
+  sliders[#sliders + 1] = { "hostilechevsize", Slider(L("chevron_size"), -168, "hostilechevsize") }
+  sliders[#sliders + 1] = { "hostilesize", Slider(L("text_size"), -208, "hostilesize") }
+  sliders[#sliders + 1] = { "hostilenamegap", Slider(L("name_gap"), -248, "hostilenamegap") }
   sliders[#sliders + 1] = {
-    "hostileoutlinesize", Slider(L("outline_size"), -870, "hostileoutlinesize", OUTLINE_GEOMETRY),
+    "hostileoutlinesize", Slider(L("outline_size"), -128, "hostileoutlinesize", OUTLINE_GEOMETRY),
   }
   -- The chevron sizes of the friends and of the guildmates (created last: the specs find sliders by
   -- creation order), right below their outline rows.
-  sliders[#sliders + 1] = { "friendchevsize", Slider(L("chevron_size"), -526, "friendchevsize") }
-  sliders[#sliders + 1] = { "guildchevsize", Slider(L("chevron_size"), -718, "guildchevsize") }
-  Preview(-824, true, HostileColor, "hostileoutlinesize", "hostilechevsize")
+  content = pages.players.content
+  sliders[#sliders + 1] = { "friendchevsize", Slider(L("chevron_size"), -490, "friendchevsize") }
+  sliders[#sliders + 1] = { "guildchevsize", Slider(L("chevron_size"), -722, "guildchevsize") }
+  content = pages.quests.content
+  Preview(-82, true, HostileColor, "hostileoutlinesize", "hostilechevsize")
 
   -- Name font: a drop-down listing Core.FONTS, beside the name colour of the group members.
   -- Without the client's UIDropDownMenu API it falls back to a button that cycles through them.
   -- Created last: the specs find buttons by creation order.
+  content = pages.main.content
   Label(L("name_font"), 260, -54)
   local function CurrentFont()
     return Core.FindFont(type(db) == "table" and db.font) or Core.FONTS[1]
@@ -2266,6 +2569,33 @@ local function BuildPanel()
     end)
   end
 
+  -- Friendly NPCs: the game's friendly NPC nameplates setting (alone on the first row), then role
+  -- icons and name only, then the name's text size and the icon size. Created last: the specs
+  -- find widgets by creation order.
+  content = pages.npcs.content
+  local NPC_Y = -48
+  Group(L("services"), NPC_Y, 230)
+  local npcPlatesBox = Checkbox(L("npc_plates"), NPC_Y - 32, function(v)
+    local ok, why = SetNpcPlates(v)
+    if not ok then
+      Print("friendly NPC nameplates not changed: " .. (NPC_PLATES_REFUSED[why] or tostring(why)))
+      if RefreshPanel then
+        RefreshPanel()
+      end
+    end
+  end)
+  -- "(Beta)": the role detection is still being developed (shipped list, subtitles, learning).
+  local servicesBox = Checkbox(L("show_icons") .. " (Beta)", NPC_Y - 72, function(v) SetFlag("npcicons", v) end)
+  local serviceCompactBox = Checkbox(L("compact"), NPC_Y - 72, function(v) SetFlag("npccompact", v) end, 260)
+  sliders[#sliders + 1] = { "npcsize", Slider(L("text_size"), NPC_Y - 114, "npcsize") }
+  sliders[#sliders + 1] = { "npciconsize", Slider(L("icon_size"), NPC_Y - 194, "npciconsize") }
+  sliders[#sliders + 1] = { "npcnamegap", Slider(L("name_gap"), NPC_Y - 154, "npcnamegap") }
+  -- The friends' and guildmates' text sizes, below their chevron sizes (created last: the specs find
+  -- sliders by creation order).
+  content = pages.players.content
+  sliders[#sliders + 1] = { "friendsize", Slider(L("text_size"), -530, "friendsize") }
+  sliders[#sliders + 1] = { "guildsize", Slider(L("text_size"), -762, "guildsize") }
+
   -- Reads the saved settings into the controls.
   RefreshPanel = function()
     refreshing = true
@@ -2285,6 +2615,9 @@ local function BuildPanel()
       end
       classBox:SetChecked(Flag("classcolor"))
       levelBox:SetChecked(Flag("showlevel"))
+      servicesBox:SetChecked(Flag("npcicons"))
+      serviceCompactBox:SetChecked(Flag("npccompact"))
+      npcPlatesBox:SetChecked(NpcPlates() == true)
       for _, sl in ipairs(sliders) do
         local v = Core.GAP_KINDS[sl[1]] and Gap(sl[1]) or Factor(sl[1])
         sl[2]:SetValue(v)
@@ -2296,13 +2629,28 @@ local function BuildPanel()
       error(err, 0)
     end
   end
-  panel:SetScript("OnShow", function()
-    SafeCall("options panel show", RefreshPanel)
-  end)
+  -- The other pages' Reset buttons, below their sections (created last: the specs find buttons
+  -- by creation order).
+  content = pages.players.content
+  ResetButton(-1046, "players")
+  content = pages.quests.content
+  ResetButton(-296, "quests")
+  content = pages.npcs.content
+  ResetButton(-294, "npcs")
 
-  local cat = Settings.RegisterCanvasLayoutCategory(panel, "GroupChevron")
+  -- The GroupChevron category and its sub-categories. A client without sub-categories gets one
+  -- category per page instead ("GroupChevron - <page>").
+  local cat = Settings.RegisterCanvasLayoutCategory(pages.root.panel, "GroupChevron")
   Settings.RegisterAddOnCategory(cat)
   category = cat
+  for _, key in ipairs({ "main", "players", "quests", "npcs" }) do
+    local page = pages[key]
+    local sub = Settings.RegisterCanvasLayoutSubcategory
+    if type(sub) ~= "function" or not pcall(sub, cat, page.panel, page.title) then
+      Settings.RegisterAddOnCategory(Settings.RegisterCanvasLayoutCategory(page.panel,
+        "GroupChevron - " .. page.title))
+    end
+  end
 end
 
 -- OpenOptions opens the panel (/gchev options). It may be refused in combat: never an error.
@@ -2396,6 +2744,13 @@ function handlers.PLAYER_ENTERING_WORLD()
   if FriendlyPlatesOff() then
     NoticeOnce("friendsoff", "friendly player nameplates are off (V / Shift+V): group members cannot be marked")
   end
+  -- Said once per install (the setting is the player's): the friendly NPC options need NPC plates.
+  if type(db) == "table" and (Flag("npcicons") or Flag("npccompact")) and NpcPlates() == false
+    and not db.npcplatesnoticed then
+    db.npcplatesnoticed = true
+    Print("the friendly NPC options (role icons above flight masters, vendors...) need friendly NPC nameplates, "
+      .. "which are off: /gchev npcplates on")
+  end
   RefreshAll()
 end
 
@@ -2457,8 +2812,11 @@ local function OnHealth(unit)
     return
   end
   local info = Info(unit)
-  if Core.PlateMode(info, ModeSettings()) == "compact" then
-    Compact(uf, uf, unit, Level(unit, info))
+  local mode = Core.PlateMode(info, ModeSettings())
+  if mode == "compact" then
+    Compact(uf, uf, unit, Level(unit, info), nil, GuildLine(unit, info))
+  elseif mode == "npc" and Flag("npccompact") and marks[uf] then
+    Compact(uf, uf, unit, nil, Core.DEFAULT_FACTOR)
   end
 end
 
@@ -2518,6 +2876,58 @@ end
 -- pcall RegisterEvent below.
 for _, event in ipairs({ "QUEST_LOG_UPDATE", "UNIT_QUEST_LOG_CHANGED", "QUEST_ACCEPTED", "QUEST_REMOVED" }) do
   handlers[event] = ScheduleFriendRefresh
+end
+
+-- Service NPCs: the windows an NPC opens tell its role for sure (a merchant who repairs, a flight
+-- master...). The role is learned by creature ID (the "npc" unit's GUID, readable during the
+-- interaction) into GroupChevronDB.npcroles, only while the feature is on, and the plates are
+-- re-checked (same coalesced refresh). Both the classic events and the interaction manager's are
+-- listened to (whichever the client has; an unknown event just fails its pcall RegisterEvent).
+local function LearnFromNPC(kind)
+  if type(db) ~= "table" or not Enabled() or not Flag("npcicons") then
+    return
+  end
+  local id = Core.NpcID(Try(UnitGUID, "npc"))
+  -- A merchant who repairs, a trainer who teaches a profession (unverified on the Forever client:
+  -- without the function, every trainer counts as a class trainer).
+  local more = false
+  if kind == "merchant" then
+    more = Try(CanMerchantRepair) == true
+  elseif kind == "trainer" then
+    more = Try(IsTradeskillTrainer) == true
+  end
+  if Core.LearnRole(db.npcroles, id, Core.InteractionRole(kind, more)) then
+    ScheduleFriendRefresh()
+  end
+end
+
+for event, kind in pairs({ MERCHANT_SHOW = "merchant", TAXIMAP_OPENED = "taxi", BANKFRAME_OPENED = "banker",
+  AUCTION_HOUSE_SHOW = "auctioneer", TRAINER_SHOW = "trainer", PET_STABLE_SHOW = "stable",
+  CONFIRM_BINDER = "binder" }) do
+  handlers[event] = function()
+    LearnFromNPC(kind)
+  end
+end
+
+-- INTERACTION_TYPES: the names in Enum.PlayerInteractionType of the windows above.
+local INTERACTION_TYPES = {
+  Merchant = "merchant", TaxiNode = "taxi", Banker = "banker", Auctioneer = "auctioneer", Trainer = "trainer",
+  StableMaster = "stable", Binder = "binder",
+}
+
+function handlers.PLAYER_INTERACTION_MANAGER_FRAME_SHOW(interaction)
+  interaction = Readable(interaction)
+  local types = Field(_G.Enum, "PlayerInteractionType")
+  if interaction == nil or type(types) ~= "table" then
+    return
+  end
+  for name, kind in pairs(INTERACTION_TYPES) do
+    local v = Field(types, name)
+    if v ~= nil and v == interaction then
+      LearnFromNPC(kind)
+      return
+    end
+  end
 end
 
 function handlers.NAME_PLATE_UNIT_REMOVED(unit)
@@ -2598,6 +3008,24 @@ local function QuestText(unit, what)
     QUEST_SOURCE_NAMES[info.questSource] or tostring(info.questSource), tostring(info.attackable))
 end
 
+-- SERVICE_SOURCE_NAMES are the sources of Core.ServiceLookup, as /gchev prints them.
+local SERVICE_SOURCE_NAMES = {
+  learned = "learned from its window",
+  shipped = "shipped with the addon",
+  subtitle = "subtitle",
+  none = "none",
+}
+
+-- ServiceText says whether unit counts as a service NPC, its role and where the role comes from,
+-- e.g. "target service NPC: yes, flight (subtitle)".
+local function ServiceText(unit, what)
+  local info = Info(unit)
+  local yes = Core.ServiceNPC(info, ModeSettings())
+  return string.format("%s service NPC: %s, %s (%s; subtitle %q)", what, yes and "yes" or "no",
+    tostring(info.service or "no role"), SERVICE_SOURCE_NAMES[info.serviceSource] or "not asked",
+    tostring(Core.TooltipSubtitle(unitAPI, unit) or ""))
+end
+
 -- ClassText gives unit's class token and class colour, and the colour its name gets, e.g.
 -- "class MAGE, class colour #3FC7EB (classcolor on), name colour: class #3FC7EB".
 local function ClassText(unit)
@@ -2631,12 +3059,14 @@ local function SlashStatus()
   elseif lastNameField then
     field = "UnitFrame." .. lastNameField
   end
-  local n, friends, guildmates, classes, quests = 0, 0, 0, 0, 0
+  local n, friends, guildmates, classes, quests, services = 0, 0, 0, 0, 0, 0
   for _, m in pairs(marks) do
     if m.kind == "member" then
       n = n + 1
     elseif m.kind == "quest" then
       quests = quests + 1
+    elseif m.kind == "npc" or m.kind == "npccompact" then
+      services = services + 1
     elseif m.kind == "guild" or m.kind == "guildcompact" then
       guildmates = guildmates + 1
     elseif m.kind == "class" or m.kind == "classcompact" then
@@ -2647,11 +3077,11 @@ local function SlashStatus()
   end
   Print(string.format("%s, colour %s, name field: %s, %d plate(s) marked", db.enabled and "on" or "off",
     Core.FormatColor(Color()), field, n))
-  Print(string.format("friends: colour %s, chevron %s, Battle.net friends %s, %d plate(s) marked; %s",
-    Core.FormatColor(FriendColor()), Flag("friendchevron") and "on" or "off", Flag("bnetfriends") and "on" or "off",
-    friends, FriendText("target", "target")))
-  Print(string.format("guildmates: colour %s, chevron %s, %d plate(s) marked; %s",
-    Core.FormatColor(GuildColor()), Flag("guildchevron") and "on" or "off", guildmates,
+  Print(string.format("friends: colour %s, friendsize %s, chevron %s, Battle.net friends %s, %d plate(s) marked; %s",
+    Core.FormatColor(FriendColor()), tostring(Factor("friendsize")), Flag("friendchevron") and "on" or "off",
+    Flag("bnetfriends") and "on" or "off", friends, FriendText("target", "target")))
+  Print(string.format("guildmates: colour %s, guildsize %s, chevron %s, %d plate(s) marked; %s",
+    Core.FormatColor(GuildColor()), tostring(Factor("guildsize")), Flag("guildchevron") and "on" or "off", guildmates,
     GuildText("target", "target")))
   Print(string.format("group members: chevsize %s, textsize %s, barsize %s, buffsize %s, namegap %d",
     tostring(Factor("chevsize")), tostring(Factor("textsize")), tostring(Factor("barsize")),
@@ -2662,6 +3092,22 @@ local function SlashStatus()
   Print(string.format("hostiles (quest): colour %s, hostilechevsize %s, hostilesize %s, hostilenamegap %d, "
     .. "%d plate(s) marked; %s", Core.FormatColor(HostileColor()), tostring(Factor("hostilechevsize")),
     tostring(Factor("hostilesize")), Gap("hostilenamegap"), quests, QuestText("target", "target")))
+  local learned = 0
+  for _ in pairs(type(db.npcroles) == "table" and db.npcroles or {}) do
+    learned = learned + 1
+  end
+  local shipped = 0
+  for _ in pairs(Core.SHIPPED_ROLES) do
+    shipped = shipped + 1
+  end
+  local plates = NpcPlates()
+  Print(string.format("friendly NPCs: icons %s, compact %s, npcsize %s, npcnamegap %d, npciconsize %s, "
+    .. "friendly NPC nameplates %s, %d role(s) learned, %d shipped, %d plate(s) marked; %s",
+    Flag("npcicons") and "on" or "off",
+    Flag("npccompact") and "on" or "off", tostring(Factor("npcsize")), Gap("npcnamegap"),
+    tostring(Factor("npciconsize")),
+    plates == nil and "unknown" or (plates and "on" or "off"), learned, shipped, services,
+    ServiceText("target", "target")))
   Print(string.format("name font: %s", tostring(db.font)))
   local c = 0
   for _ in pairs(hidden) do
@@ -2674,11 +3120,15 @@ local function SlashStatus()
   Print("/gchev on | off | color #RRGGBB | chevsize 1-5 | textsize 1-3 | barsize 1-3 | buffsize 1-3"
     .. " | namegap -10-40 | friendcolor #RRGGBB | friendchevron on|off | bnetfriends on|off"
     .. " | guildcolor #RRGGBB | guildchevron on|off"
-    .. " | friendchevsize 1-5 | guildchevsize 1-5 | hostilecolor #RRGGBB | hostilechevsize 1-5"
+    .. " | friendchevsize 1-5 | guildchevsize 1-5 | friendsize 1-3 | guildsize 1-3 | hostilecolor #RRGGBB"
+    .. " | hostilechevsize 1-5"
     .. " | hostilesize 1-3 | hostilenamegap -10-40"
     .. " | memberoutlinesize|friendoutlinesize|guildoutlinesize|hostileoutlinesize 0-5"
     .. " | othersize 1-3 | otherbarsize 1-3 | othernamegap -10-40 | level on|off | compact on|off | classcolor on|off"
-    .. " | font default|outline|chat|large|game13 | reset | options | debug")
+    .. " | font default|outline|chat|large|game13"
+    .. " | npcplates on|off | npcicons on|off | npccompact on|off | npcsize 1-3 | npcnamegap -10-40 | npciconsize 1-15"
+    .. " | icon [<role> <texture or atlas>|default]"
+    .. " | reset | options | debug")
 end
 
 -- PartLabel names a plate part for /gchev debug: its frame name, else the field that holds it
@@ -2814,6 +3264,7 @@ local function SlashDebug()
   Print("debug: " .. FriendText(unit, "target"))
   Print("debug: " .. GuildText(unit, "target"))
   Print("debug: " .. QuestText(unit, "target"))
+  Print("debug: " .. ServiceText(unit, "target"))
   Print("debug: " .. ClassText(unit))
   -- Blizzard's name on this plate, and whether ours covers it (enemies without a name: Blizzard's
   -- alpha 0 and "covered: no" would be a fade we failed to give back).
@@ -2856,6 +3307,57 @@ local function SlashDebug()
   for _, part in ipairs(parts) do
     Print(string.format("debug:   %s (%s)", PartLabel(part, tables), tostring(Method(part, "GetObjectType") or "?")))
   end
+end
+
+-- SlashIcon (/gchev icon [role [name|default]]) lists the role icons, or sets one: a texture path
+-- (Interface\Icons\...) or an atlas name the client has; "default" gives the role its own back.
+local function SlashIcon(arg)
+  local role, name = arg:match("^(%S*)%s*(.-)%s*$")
+  role = (role or ""):lower()
+  if role == "" then
+    for _, r in ipairs(Core.ROLES) do
+      local chosen = db.roleicons[r.key]
+      Print(string.format("icon %s: %s%s", r.key, IconName(r.key), chosen and " (yours)" or ""))
+    end
+    Print("/gchev icon <role> <texture or atlas> | /gchev icon <role> default")
+    return
+  end
+  if not Core.ValidRole(role) then
+    local keys = {}
+    for _, r in ipairs(Core.ROLES) do
+      keys[#keys + 1] = r.key
+    end
+    Print(string.format("unknown role %q: use %s; nothing changed", role, table.concat(keys, " | ")))
+    return
+  end
+  if name == "" then
+    Print(string.format("icon %s: %s", role, IconName(role)))
+    return
+  end
+  if name:lower() == "default" then
+    db.roleicons[role] = nil
+    Changed()
+    Print(string.format("icon %s: %s (default)", role, IconName(role)))
+    return
+  end
+  if not Core.ValidIconName(name) then
+    Print(string.format("invalid icon %q: use a texture path (Interface\\Icons\\...) or an atlas name; "
+      .. "nothing changed", name))
+    return
+  end
+  if not Core.IsTexturePath(name) then
+    local known = AtlasKnown(name)
+    if known == false then
+      Print(string.format("this client has no atlas %q; nothing changed", name))
+      return
+    elseif known == nil then
+      Print("this client cannot check atlas names: use a texture path; nothing changed")
+      return
+    end
+  end
+  db.roleicons[role] = name
+  Changed()
+  Print(string.format("icon %s: %s", role, name))
 end
 
 local function Slash(msg)
@@ -2996,6 +3498,21 @@ local function Slash(msg)
       return
     end
     Print("compact " .. (db.compact and "on" or "off"))
+  elseif cmd == "icon" or cmd == "icons" then
+    SlashIcon(arg)
+  elseif cmd == "npcplates" then
+    if arg == "" then
+      local on = NpcPlates()
+      Print(string.format("npcplates %s (the game's friendly NPC nameplates setting)",
+        on == nil and "unknown" or (on and "on" or "off")))
+      return
+    end
+    local ok, why = SetNpcPlates(arg)
+    if not ok then
+      Print(string.format("npcplates %q: %s; nothing changed", arg, NPC_PLATES_REFUSED[why] or tostring(why)))
+      return
+    end
+    Print("npcplates " .. (NpcPlates() and "on" or "off"))
   elseif cmd == "reset" then
     ResetColor()
     Print("colour reset to " .. Core.FormatColor(Color()))

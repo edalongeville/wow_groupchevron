@@ -49,6 +49,8 @@ local function newRegion()
     return not textureMissing
   end
   function r:SetVertexColor(cr, cg, cb, ca) self.vertex = { cr, cg, cb, ca } end
+  function r:SetTexCoord(...) self.texcoord = { ... } end
+  function r:SetAtlas(name) self.atlas, self.texture = name, nil end
   return r
 end
 
@@ -155,7 +157,10 @@ end
 -- NEUTRAL_SETTINGS are the settings the specs run with unless they say otherwise (see load).
 local NEUTRAL_SETTINGS = {
   chevsize = 1, textsize = 1, buffsize = 1, namegap = 0, othernamegap = 0, font = "default", classcolor = false,
-  hostilechevsize = 1, friendchevsize = 1, guildchevsize = 1, hostilesize = 1, hostilenamegap = 0,
+  hostilechevsize = 1, friendchevsize = 1, guildchevsize = 1, hostilesize = 1, hostilenamegap = 0, othersize = 1,
+  friendsize = 1, guildsize = 1,
+  -- Friendly NPCs are left as Blizzard draws them unless a spec turns their options on.
+  npccompact = false,
 }
 
 local function load(opts)
@@ -167,7 +172,7 @@ local function load(opts)
   -- world.classes[unit]: the unit's class token (UnitClass); C_ClassColor knows MAGE and
   -- PRIEST, RAID_CLASS_COLORS MAGE, PRIEST and WARLOCK (so WARLOCK needs the fallback).
   local world = { plates = {}, players = {}, party = {}, friends = {}, health = {}, flist = {}, bnet = {},
-    classes = {}, timers = {}, cvars = { nameplateShowFriends = "1" }, levels = {},
+    classes = {}, timers = {}, cvars = { nameplateShowFriends = "1" }, levels = {}, guilds = {},
     -- world.inGuild: the player is in a guild; world.guild[unit]: the unit is in the player's
     -- guild (UnitIsInMyGuild); world.guildCalls counts the guild questions asked.
     inGuild = false, guild = {}, guildCalls = 0,
@@ -250,6 +255,8 @@ local function load(opts)
     UnitHealthMax = function(unit) return (world.health[unit] or { 100, 100 })[2] end,
     -- world.levels[unit]: the unit's level; unknown units have none (nil: not readable).
     UnitLevel = function(unit) return world.levels[unit] end,
+    -- world.guilds[unit]: the name of the unit's guild (GetGuildInfo); unknown units have none.
+    GetGuildInfo = function(unit) return world.guilds[unit] end,
     -- hooksecurefunc("Global", fn) or hooksecurefunc(object, "Method", fn): hooks[name] = fn.
     hooksecurefunc = function(a, b, c)
       if type(a) == "table" then
@@ -290,10 +297,15 @@ local function load(opts)
   setmetatable(env, { __index = _G })
 
   local ns = {}
-  for _, file in ipairs({ "GroupChevron/Core.lua", "GroupChevron/GroupChevron.lua" }) do
+  for _, file in ipairs({ "GroupChevron/NpcRoles.lua", "GroupChevron/Core.lua", "GroupChevron/GroupChevron.lua" }) do
     local chunk = assert(loadfile(file))
     setfenv(chunk, env)
     chunk("GroupChevron", ns)
+    -- opts.shipped stands for the roles shipped with the addon (NpcRoles.lua); the specs never
+    -- depend on the real list, which grows with every import.
+    if file == "GroupChevron/NpcRoles.lua" then
+      ns.NpcRoles = opts.shipped or {}
+    end
   end
   env.frames, env.printed, env.hooks, env.world = frames, printed, hooks, world
   env.fire = function(event, ...)
@@ -380,7 +392,7 @@ describe("GroupChevron", function()
     assert.is_true(db.compact)
     assert.is_true(db.classcolor)
     assert.is_true(db.showlevel)
-    assert.are.equal(1, db.othersize)
+    assert.are.equal(1.5, db.othersize)
     assert.are.equal(1, db.otherbarsize)
     assert.are.equal(5, db.othernamegap)
     assert.are.equal("#3FA7FF", hex(db.friendcolor))
@@ -388,11 +400,13 @@ describe("GroupChevron", function()
     assert.is_true(db.bnetfriends)
     assert.are.equal("#40FF40", hex(db.guildcolor))
     assert.is_true(db.guildchevron)
-    -- The hostiles start like the friendlies: chevron at the friends' chevron size, text size 1,
-    -- name height 5; the colour is yellow.
+    -- The hostiles start like the friendlies: chevron at the friends' chevron size, text size 1.5,
+    -- name height 5; the colour is yellow. Friends and guildmates: text size 1.75.
     assert.are.equal("#FFFF00", hex(db.hostilecolor))
     assert.are.equal(3, db.hostilechevsize)
-    assert.are.equal(1, db.hostilesize)
+    assert.are.equal(1.5, db.hostilesize)
+    assert.are.equal(1.75, db.friendsize)
+    assert.are.equal(1.75, db.guildsize)
     assert.are.equal(5, db.hostilenamegap)
   end)
 
@@ -1205,7 +1219,7 @@ describe("GroupChevron", function()
       assert.are.equal(1, holder.scale)
 
       env.slash("othersize")
-      assert.is_true(printedContains(env, "othersize 1 (1 to 3, default 1)"))
+      assert.is_true(printedContains(env, "othersize 1 (1 to 3, default 1.5)"))
       env.slash("othersize 1.75")
       assert.are.equal(1.75, env.GroupChevronDB.othersize)
       assert.are.equal(1.75, holder.scale)
@@ -1877,8 +1891,9 @@ describe("GroupChevron", function()
       looksFriend(env, plate, "#3FA7FF", true)
     end)
 
-    it("sizes a friend's full plate with othersize and otherbarsize (compact off), not the member sizes", function()
-      local env = load({ saved = { compact = false, othersize = 2, otherbarsize = 2, textsize = 3, barsize = 2 } })
+    it("sizes a friend's full plate with friendsize and otherbarsize (compact off), not the member sizes", function()
+      local env = load({ saved = { compact = false, friendsize = 2, othersize = 3, otherbarsize = 2, textsize = 3,
+        barsize = 2 } })
       local plate = newTreePlate("nameplate2")
       friend(env, plate)
       assert.are.same({}, alphas(plate))
@@ -1901,8 +1916,8 @@ describe("GroupChevron", function()
       assert.is_true((plate.UnitFrame.HealthBarsContainer.scale or 1) == 1)
     end)
 
-    it("uses the othersize and otherbarsize of compact plates", function()
-      local env = load({ saved = { othersize = 2, otherbarsize = 1.5 } })
+    it("uses the friendsize and otherbarsize of compact plates", function()
+      local env = load({ saved = { friendsize = 2, othersize = 3, otherbarsize = 1.5 } })
       local plate = newTreePlate("nameplate2")
       friend(env, plate)
       local _, holder = env.label(plate)
@@ -2096,7 +2111,7 @@ describe("GroupChevron", function()
       env.world.plates.target = plate
       env.slash("")
       assert.is_true(printedContains(env,
-        "friends: colour #3FA7FF, chevron on, Battle.net friends on, 1 plate(s) marked"))
+        "friends: colour #3FA7FF, friendsize 1, chevron on, Battle.net friends on, 1 plate(s) marked"))
       assert.is_true(printedContains(env, "friendcolor #RRGGBB | friendchevron on|off | bnetfriends on|off"))
       env.fire("PLAYER_TARGET_CHANGED")
       env.slash("debug")
@@ -2588,7 +2603,7 @@ describe("GroupChevron", function()
       env.world.target = "nameplate2"
       env.world.plates.target = plate
       env.slash("")
-      assert.is_true(printedContains(env, "guildmates: colour #40FF40, chevron on, 1 plate(s) marked"))
+      assert.is_true(printedContains(env, "guildmates: colour #40FF40, guildsize 1, chevron on, 1 plate(s) marked"))
       assert.is_true(printedContains(env, "guildcolor #RRGGBB | guildchevron on|off"))
       env.slash("debug")
       assert.is_true(printedContains(env, "debug: target guildmate: yes (UnitIsInMyGuild)"))
@@ -2860,6 +2875,70 @@ describe("GroupChevron", function()
       env.world.classes.nameplate2 = "PIRATE"
       env.slash("debug")
       assert.is_true(printedContains(env, "debug: class PIRATE, class colour none (classcolor off)"))
+    end)
+  end)
+
+  describe("guild line", function()
+    -- guildLine returns our second line on a plate (shown), or nil.
+    local function guildLine(env, plate)
+      local label, holder = env.label(plate)
+      if not label or not holder.shown then
+        return nil
+      end
+      for _, l in ipairs(holder.labels) do
+        if l ~= label and l.shown ~= false and type(l.text) == "string" and l.text:sub(1, 1) == "<" then
+          return l, label
+        end
+      end
+      return nil
+    end
+
+    it("puts the guild on a second line under every friendly player's name, our name above it", function()
+      local env = load()
+      -- A group member, a compact friendly player and a friendly player's full plate (compact off).
+      local member, other = newTreePlate("nameplate1"), newTreePlate("nameplate2")
+      env.world.plates.nameplate1, env.world.plates.nameplate2 = member, other
+      for _, u in ipairs({ "nameplate1", "nameplate2" }) do
+        env.world.players[u], env.world.friends[u] = true, true
+      end
+      env.world.party.nameplate1 = true
+      env.world.guilds.nameplate1, env.world.guilds.nameplate2 = "Les Gardiens", "Ordo"
+      env.fire("NAME_PLATE_UNIT_ADDED", "nameplate1")
+      env.fire("NAME_PLATE_UNIT_ADDED", "nameplate2")
+      local sub, label = guildLine(env, member)
+      assert.are.equal("<Les Gardiens>", sub.text)
+      assert.are.equal(member.UnitFrame.name, sub.points[1][2])
+      assert.are.equal(sub, label.points[1][2])
+      assert.are.equal("#FF4FD8", hex(sub.color)) -- the name's colour
+      assert.are.equal("<Ordo>", (guildLine(env, other)).text)
+      -- It stays through health updates of the compact plate.
+      env.world.health.nameplate2 = { 50, 100 }
+      env.fire("UNIT_HEALTH", "nameplate2")
+      assert.are.equal("<Ordo>", (guildLine(env, other)).text)
+      -- Compact off: the full plate gets our name (to carry the line) even at size 1, no gap.
+      env.slash("compact off")
+      assert.are.equal("<Ordo>", (guildLine(env, other)).text)
+      -- Leaving the guild: no second line, our name back on Blizzard's.
+      env.world.guilds.nameplate1 = nil
+      env.fire("GROUP_ROSTER_UPDATE")
+      assert.is_nil(guildLine(env, member))
+      local l1 = env.label(member)
+      assert.are.equal(member.UnitFrame.name, l1.points[1][2])
+    end)
+
+    it("draws nothing for players without a guild, or when it cannot be read", function()
+      for _, overrides in ipairs({ {}, { GetGuildInfo = function() error("boom") end },
+        { GetGuildInfo = function() return "secret" end, issecretvalue = function(v) return v == "secret" end } }) do
+        local env = load({ overrides = overrides, saved = { compact = false } })
+        local plate = newTreePlate("nameplate2")
+        env.world.plates.nameplate2 = plate
+        env.world.players.nameplate2, env.world.friends.nameplate2 = true, true
+        env.fire("NAME_PLATE_UNIT_ADDED", "nameplate2")
+        assert.is_nil(guildLine(env, plate))
+        -- Size 1, no gap, no guild: Blizzard's name stays.
+        assert.are.equal(1, plate.UnitFrame.name:GetAlpha())
+        assert.is_false(printedContains(env, "error in"))
+      end
     end)
   end)
 
@@ -3201,6 +3280,435 @@ describe("GroupChevron", function()
     end)
   end)
 
+  describe("service NPCs", function()
+    local NPC_GUID = "Creature-0-4372-0-1-352-0000ABCDEF"
+
+    -- npcClient returns load options for a client where nameplate5 is a friendly NPC (creature
+    -- 352) whose tooltip subtitle is npc.subtitle, the "npc" unit (an open window) is the same
+    -- creature, CanMerchantRepair answers npc.repair and the friendly NPC plates setting is
+    -- npc.cvar ("1", "0" or nil: missing).
+    local function npcClient(npc, saved)
+      local overrides = {
+        UnitGUID = function(unit)
+          if unit == "nameplate5" or unit == "npc" then
+            return NPC_GUID
+          end
+          return "Player-" .. tostring(unit)
+        end,
+        GetLocale = function() return npc.locale or "enUS" end,
+        C_TooltipInfo = {
+          GetUnit = function(unit)
+            if unit ~= "nameplate5" then
+              return nil
+            end
+            return { lines = { { leftText = "Thor" }, npc.subtitle and { leftText = npc.subtitle } or nil } }
+          end,
+        },
+        CanMerchantRepair = function() return npc.repair end,
+        IsTradeskillTrainer = function() return npc.tradeskill end,
+        InCombatLockdown = function() return npc.combat == true end,
+        C_CVar = {
+          GetCVar = function(name)
+            if name == "nameplateShowFriendlyNPCs" then
+              return npc.cvar
+            end
+            return name == "nameplateShowFriends" and "1" or nil
+          end,
+          SetCVar = function(name, v)
+            if name == "nameplateShowFriendlyNPCs" and npc.cvar ~= nil and not npc.refuse then
+              npc.cvar = v
+            end
+          end,
+        },
+        Enum = { PlayerInteractionType = { Merchant = 5, TaxiNode = 6 } },
+        -- The atlases of the Forever build (1.60.1.70959) the defaults use, plus "FlightMaster".
+        C_Texture = {
+          GetAtlasInfo = function(name)
+            local known = { FlightMaster = true, flightmaster = true, innkeeper = true, banker = true,
+              auctioneer = true, stablemaster = true, class = true, profession = true, repair = true,
+              ["levelup-icon-bag"] = true }
+            return known[name] and { width = 32 } or nil
+          end,
+        },
+      }
+      -- The friendly NPC options start from their defaults (compact on, icon size 5).
+      saved = saved or {}
+      if saved.npccompact == nil then
+        saved.npccompact = true
+      end
+      return { overrides = overrides, saved = saved }
+    end
+
+    -- showNPC puts the friendly NPC on nameplate5.
+    local function showNPC(env, plate)
+      env.world.plates.nameplate5 = plate
+      env.world.friends.nameplate5 = true
+      env.fire("NAME_PLATE_UNIT_ADDED", "nameplate5")
+    end
+
+    -- icon returns the role icon frame on a plate's UnitFrame and its texture, if any.
+    local function icon(env, plate)
+      for _, f in ipairs(env.frames) do
+        if f.parent == plate.UnitFrame and f.tex then
+          return f, f.tex.atlas or f.tex.texture
+        end
+      end
+      return nil
+    end
+
+    it("puts the role icon above a flight master's name and shows its name only", function()
+      local env = load(npcClient({ subtitle = "Gryphon Master" }))
+      local plate = newTreePlate("nameplate5")
+      showNPC(env, plate)
+      local uf = plate.UnitFrame
+      local frame, texture = icon(env, plate)
+      assert.is_true(frame.shown)
+      assert.are.equal("flightmaster", texture)
+      assert.are.equal(30, frame.w) -- 6 x the default npciconsize 5
+      -- An atlas of the client's point-of-interest icons.
+      assert.are.equal("flightmaster", frame.tex.atlas)
+      -- Above our own name, in the default green: this client has no UnitSelectionColor.
+      local label = env.label(plate)
+      assert.are.equal(label, frame.points[1][2])
+      assert.are.equal("#1AFF1A", hex(label.color))
+      -- Name only (npccompact): the health bar and cast bar are faded, the icon is kept.
+      assert.are.equal(0, uf.HealthBarsContainer.alpha)
+      assert.are.equal(0, uf.castBar.alpha)
+      assert.is_nil(frame.alpha)
+      assert.is_false(printedContains(env, "error in"))
+    end)
+
+    it("reads a French client's subtitle as the game spells it", function()
+      local env = load(npcClient({ subtitle = "Maître des gryphons", locale = "frFR" }, { npccompact = false }))
+      local plate = newTreePlate("nameplate5")
+      showNPC(env, plate)
+      local frame, texture = icon(env, plate)
+      assert.is_true(frame.shown)
+      assert.are.equal("flightmaster", texture)
+    end)
+
+    it("shows the roles shipped with the addon, and lets learned roles improve them", function()
+      local opts = npcClient({ repair = true })
+      opts.shipped = { [352] = "vendor", [7] = "bogus" }
+      local env = load(opts)
+      local plate = newTreePlate("nameplate5")
+      showNPC(env, plate)
+      assert.are.equal("levelup-icon-bag", select(2, icon(env, plate)))
+      -- The same merchant opens its window: it repairs, the better role wins.
+      env.fire("MERCHANT_SHOW")
+      env.runTimers()
+      assert.are.equal("repair", select(2, icon(env, plate)))
+      env.slash("")
+      assert.is_true(printedContains(env, "1 role(s) learned, 1 shipped"))
+      env.world.target = "nameplate5"
+      env.world.plates.target = plate
+      env.GroupChevronDB.npcroles[352] = nil
+      env.slash("debug")
+      assert.is_true(printedContains(env, "(shipped with the addon;"))
+    end)
+
+    it("lets the player pick a role's icon: an atlas the client has, or a texture path", function()
+      local env = load(npcClient({ subtitle = "Gryphon Master" }))
+      local plate = newTreePlate("nameplate5")
+      showNPC(env, plate)
+      local frame = icon(env, plate)
+      env.slash("icon flight FlightMaster")
+      assert.are.equal("FlightMaster", env.GroupChevronDB.roleicons.flight)
+      assert.are.equal("FlightMaster", frame.tex.atlas)
+      assert.is_true(frame.shown)
+      -- An atlas the client does not have, an unknown role or a bad name: refused.
+      env.slash("icon flight NoSuchAtlas")
+      assert.is_true(printedContains(env, "no atlas \"NoSuchAtlas\""))
+      env.slash("icon wizard FlightMaster")
+      assert.is_true(printedContains(env, "unknown role"))
+      env.slash("icon flight bad name!")
+      assert.are.equal("FlightMaster", env.GroupChevronDB.roleicons.flight)
+      -- A texture path, shown whole unless it is an Interface\Icons one.
+      env.slash("icon flight Interface\\Minimap\\Tracking\\FlightMaster")
+      assert.are.equal("Interface\\Minimap\\Tracking\\FlightMaster", frame.tex.texture)
+      assert.are.same({ 0, 1, 0, 1 }, frame.tex.texcoord)
+      -- Back to the default; /gchev icon lists them all.
+      env.slash("icon flight default")
+      assert.is_nil(env.GroupChevronDB.roleicons.flight)
+      assert.are.equal("flightmaster", frame.tex.atlas)
+      env.slash("icon")
+      assert.is_true(printedContains(env, "icon vendor: levelup-icon-bag"))
+      assert.is_false(printedContains(env, "error in"))
+    end)
+
+    it("shows the health bar only while hurt, the target included, and never scales it", function()
+      local env = load(npcClient({ subtitle = "Gryphon Master" }, { otherbarsize = 2 }))
+      local plate = newTreePlate("nameplate5")
+      showNPC(env, plate)
+      local uf = plate.UnitFrame
+      assert.are.equal(0, uf.HealthBarsContainer.alpha)
+      env.world.target = "nameplate5"
+      env.fire("PLAYER_TARGET_CHANGED")
+      assert.are.equal(0, uf.HealthBarsContainer.alpha)
+      assert.is_true(icon(env, plate).shown)
+      -- Hurt: the bar shows, target or not.
+      env.world.health.nameplate5 = { 50, 100 }
+      env.fire("UNIT_HEALTH", "nameplate5")
+      assert.are.equal(1, uf.HealthBarsContainer.alpha)
+      env.world.health.nameplate5 = { 100, 100 }
+      env.fire("UNIT_HEALTH", "nameplate5")
+      assert.are.equal(0, uf.HealthBarsContainer.alpha)
+      assert.are.equal(1, uf.HealthBarsContainer:GetScale())
+    end)
+
+    it("shows \"<name> (<level>)\" with the subtitle below it, the level even while hurt", function()
+      local env = load(npcClient({ subtitle = "Maître des gryphons", locale = "frFR" }, { npcnamegap = 3 }))
+      local plate = newTreePlate("nameplate5")
+      env.world.levels.nameplate5 = 55
+      showNPC(env, plate)
+      local uf = plate.UnitFrame
+      local label, holder = env.label(plate)
+      assert.are.equal("Farbatosz Marokbar (55)", label.text)
+      -- The subtitle: the last FontString of our frame, where Blizzard's name was (+ npcnamegap),
+      -- our name right above it, the icon above our name.
+      local sub = holder.labels[#holder.labels]
+      assert.are.equal("<Maître des gryphons>", sub.text)
+      assert.is_true(sub.shown)
+      assert.are.equal(uf.name, sub.points[1][2])
+      assert.are.equal(3, sub.points[1][5])
+      assert.are.equal(sub, label.points[1][2])
+      assert.are.equal("TOP", label.points[1][3])
+      assert.are.equal(label, icon(env, plate).points[1][2])
+      assert.are.equal(label.color[1], sub.color[1])
+      -- Hurt: the bar shows and the level stays.
+      env.world.health.nameplate5 = { 50, 100 }
+      env.fire("UNIT_HEALTH", "nameplate5")
+      assert.are.equal("Farbatosz Marokbar (55)", label.text)
+      assert.are.equal(1, label.alpha)
+    end)
+
+    it("takes the game's reaction colour for the name, and gives Blizzard's back afterwards", function()
+      local npc = { subtitle = "Gryphon Master" }
+      local opts = npcClient(npc)
+      opts.overrides.UnitSelectionColor = function() return 1, 1, 0, 1 end -- neutral: yellow
+      local env = load(opts)
+      local plate = newTreePlate("nameplate5")
+      showNPC(env, plate)
+      local label, holder = env.label(plate)
+      assert.are.equal("#FFFF00", hex(label.color))
+      assert.are.equal("#FFFF00", hex(holder.labels[#holder.labels].color))
+      -- The plate stops being a friendly NPC: Blizzard's own colour comes back.
+      env.world.friends.nameplate5 = false
+      env.world.attackable.nameplate5 = true
+      env.fire("UNIT_LEVEL", "nameplate5")
+      assert.are.equal("#0080FF", hex(plate.UnitFrame.name.color))
+      -- A failing or secret colour: the default green.
+      for _, fn in ipairs({ function() error("boom") end, function() return "secret", 1, 1 end }) do
+        opts = npcClient({ subtitle = "Gryphon Master" })
+        opts.overrides.UnitSelectionColor = fn
+        opts.overrides.issecretvalue = function(v) return v == "secret" end
+        env = load(opts)
+        plate = newTreePlate("nameplate5")
+        showNPC(env, plate)
+        assert.are.equal("#1AFF1A", hex(env.label(plate).color))
+        assert.is_false(printedContains(env, "error in"))
+      end
+    end)
+
+    it("shows no subtitle line when the tooltip's second line is the level line", function()
+      local env = load(npcClient({ subtitle = "Level 12 Humanoid" }))
+      local plate = newTreePlate("nameplate5")
+      env.world.levels.nameplate5 = 12
+      showNPC(env, plate)
+      local label, holder = env.label(plate)
+      assert.are.equal("Farbatosz Marokbar (12)", label.text)
+      for _, l in ipairs(holder.labels) do
+        assert.is_true(l == label or l.text ~= "Level 12 Humanoid" or l.shown == false)
+      end
+      assert.are.equal(plate.UnitFrame.name, label.points[1][2])
+    end)
+
+    it("keeps Blizzard's full plate with npccompact off, and sizes the icon", function()
+      local env = load(npcClient({ subtitle = "Innkeeper" }, { npccompact = false, npciconsize = 2 }))
+      local plate = newTreePlate("nameplate5")
+      showNPC(env, plate)
+      local frame, texture = icon(env, plate)
+      assert.are.equal("innkeeper", texture)
+      assert.are.equal(12, frame.w)
+      assert.is_nil(plate.UnitFrame.HealthBarsContainer.alpha)
+      env.slash("npciconsize 4")
+      assert.are.equal(24, frame.w)
+    end)
+
+    it("shows every friendly NPC's name only, role or not, with the icons off too", function()
+      -- No role: name only, no icon.
+      local env = load(npcClient({ subtitle = "Level 12" }))
+      local plate = newTreePlate("nameplate5")
+      showNPC(env, plate)
+      local frame = icon(env, plate)
+      assert.is_true(frame == nil or frame.shown == false)
+      assert.are.equal(0, plate.UnitFrame.HealthBarsContainer.alpha)
+
+      -- Icons off, compact on (seen in game: the health bar stayed): name only, no icon.
+      env = load(npcClient({ subtitle = "Gryphon Master", repair = true }, { npcicons = false }))
+      plate = newTreePlate("nameplate5")
+      showNPC(env, plate)
+      frame = icon(env, plate)
+      assert.is_true(frame == nil or frame.shown == false)
+      assert.are.equal(0, plate.UnitFrame.HealthBarsContainer.alpha)
+      assert.is_not_nil(env.label(plate))
+      -- Nothing is learned while the icons are off.
+      env.fire("MERCHANT_SHOW")
+      assert.are.same({}, env.GroupChevronDB.npcroles)
+    end)
+
+    it("leaves friendly NPCs alone with every option off, and sizes their names", function()
+      local env = load(npcClient({ subtitle = "Gryphon Master" }, { npcicons = false, npccompact = false }))
+      local plate = newTreePlate("nameplate5")
+      showNPC(env, plate)
+      assert.is_nil(icon(env, plate))
+      assert.is_nil(env.label(plate))
+      assert.is_nil(plate.UnitFrame.HealthBarsContainer.alpha)
+      assert.are.equal(1, plate.UnitFrame.name:GetAlpha())
+      -- A text size other than 1 is enough: our name at that size, the rest of the plate Blizzard's.
+      env.slash("npcsize 2")
+      local _, holder = env.label(plate)
+      assert.are.equal(2, holder.scale)
+      assert.is_nil(plate.UnitFrame.HealthBarsContainer.alpha)
+      env.slash("npcsize 1")
+      assert.is_false(holder.shown)
+      assert.are.equal(1, plate.UnitFrame.name:GetAlpha())
+    end)
+
+    it("learns the role from the windows an NPC opens, and shows it at once", function()
+      local npc = { repair = false }
+      local env = load(npcClient(npc))
+      local plate = newTreePlate("nameplate5")
+      showNPC(env, plate)
+      assert.is_nil(icon(env, plate))
+      env.fire("MERCHANT_SHOW")
+      assert.are.equal("vendor", env.GroupChevronDB.npcroles[352])
+      env.runTimers()
+      local frame, texture = icon(env, plate)
+      assert.is_true(frame.shown)
+      assert.are.equal("levelup-icon-bag", texture)
+      -- The same merchant can repair: the better role wins.
+      npc.repair = true
+      env.fire("PLAYER_INTERACTION_MANAGER_FRAME_SHOW", 5)
+      env.runTimers()
+      assert.are.equal("repair", env.GroupChevronDB.npcroles[352])
+      assert.are.equal("repair", select(2, icon(env, plate)))
+      -- The interaction manager's taxi window: a flight master.
+      env.fire("PLAYER_INTERACTION_MANAGER_FRAME_SHOW", 6)
+      assert.are.equal("flight", env.GroupChevronDB.npcroles[352])
+      -- An unknown window teaches nothing.
+      env.fire("PLAYER_INTERACTION_MANAGER_FRAME_SHOW", 99)
+      assert.are.equal("flight", env.GroupChevronDB.npcroles[352])
+      -- Trainers: a profession trainer and a class trainer are two roles.
+      env.GroupChevronDB.npcroles[352] = nil
+      npc.tradeskill = true
+      env.fire("TRAINER_SHOW")
+      env.runTimers()
+      assert.are.equal("profession", env.GroupChevronDB.npcroles[352])
+      assert.are.equal("profession", select(2, icon(env, plate)))
+      env.GroupChevronDB.npcroles[352] = nil
+      npc.tradeskill = false
+      env.fire("TRAINER_SHOW")
+      env.runTimers()
+      assert.are.equal("trainer", env.GroupChevronDB.npcroles[352])
+      assert.are.equal("class", select(2, icon(env, plate)))
+      env.GroupChevronDB.npcroles[352] = "flight"
+      env.fire("PLAYER_INTERACTION_MANAGER_FRAME_SHOW", 99)
+      assert.are.equal("flight", env.GroupChevronDB.npcroles[352])
+      assert.is_false(printedContains(env, "error in"))
+    end)
+
+    it("gives everything back when the UnitFrame shows an enemy or the plate goes", function()
+      local npc = { subtitle = "Gryphon Master" }
+      local env = load(npcClient(npc))
+      local plate = newTreePlate("nameplate5")
+      showNPC(env, plate)
+      local uf = plate.UnitFrame
+      local frame = icon(env, plate)
+      assert.is_true(frame.shown)
+      -- The pooled UnitFrame now shows an enemy without a subtitle.
+      npc.subtitle = nil
+      env.world.friends.nameplate5 = false
+      env.world.attackable.nameplate5 = true
+      env.fire("NAME_PLATE_UNIT_ADDED", "nameplate5")
+      assert.is_false(frame.shown)
+      assert.are.equal(1, uf.HealthBarsContainer.alpha)
+      assert.are.equal(1, uf.name:GetAlpha())
+      -- Back to the flight master, then the plate is removed.
+      npc.subtitle = "Gryphon Master"
+      env.world.friends.nameplate5, env.world.attackable.nameplate5 = true, false
+      env.fire("NAME_PLATE_UNIT_ADDED", "nameplate5")
+      assert.is_true(frame.shown)
+      env.fire("NAME_PLATE_UNIT_REMOVED", "nameplate5")
+      assert.is_false(frame.shown)
+      assert.are.equal(1, uf.name:GetAlpha())
+    end)
+
+    it("is off with the addon, and comes back with it", function()
+      local env = load(npcClient({ subtitle = "Gryphon Master" }))
+      local plate = newTreePlate("nameplate5")
+      showNPC(env, plate)
+      env.slash("off")
+      assert.is_false(icon(env, plate).shown)
+      env.slash("on")
+      assert.is_true(icon(env, plate).shown)
+      env.slash("npcicons off")
+      assert.is_false(icon(env, plate).shown)
+      assert.is_false(env.GroupChevronDB.npcicons)
+    end)
+
+    it("turns the friendly NPC nameplates on or off only when asked, never in combat", function()
+      local npc = { cvar = "0" }
+      local env = load(npcClient(npc))
+      env.fire("PLAYER_ENTERING_WORLD")
+      assert.are.equal("0", npc.cvar) -- never changed by itself
+      assert.is_true(printedContains(env, "/gchev npcplates on"))
+      assert.is_true(env.GroupChevronDB.npcplatesnoticed)
+      env.slash("npcplates on")
+      assert.are.equal("1", npc.cvar)
+      assert.is_true(printedContains(env, "npcplates on"))
+      npc.combat = true
+      env.slash("npcplates off")
+      assert.are.equal("1", npc.cvar)
+      assert.is_true(printedContains(env, "not allow it in combat"))
+      npc.combat = false
+      env.slash("npcplates maybe")
+      assert.are.equal("1", npc.cvar)
+      env.slash("npcplates off")
+      assert.are.equal("0", npc.cvar)
+      npc.refuse = true
+      env.slash("npcplates on")
+      assert.is_true(printedContains(env, "refused the change"))
+
+      -- Said once per install only.
+      local saved = { npcplatesnoticed = true }
+      env = load(npcClient({ cvar = "0" }, saved))
+      env.fire("PLAYER_ENTERING_WORLD")
+      assert.is_false(printedContains(env, "/gchev npcplates on"))
+
+      -- A client without the setting.
+      env = load(npcClient({}))
+      env.slash("npcplates on")
+      assert.is_true(printedContains(env, "no friendly NPC nameplates setting"))
+      assert.is_false(printedContains(env, "error in"))
+    end)
+
+    it("prints the service NPC state in /gchev and /gchev debug", function()
+      local env = load(npcClient({ subtitle = "Gryphon Master", cvar = "1" }))
+      local plate = newTreePlate("nameplate5")
+      showNPC(env, plate)
+      env.slash("")
+      assert.is_true(printedContains(env,
+        "friendly NPCs: icons on, compact on, npcsize 1, npcnamegap 5, npciconsize 5, friendly NPC nameplates on"))
+      assert.is_true(printedContains(env, "1 plate(s) marked"))
+      env.world.target = "nameplate5"
+      env.world.plates.target = plate
+      env.slash("debug")
+      assert.is_true(printedContains(env, "target service NPC: yes, flight (subtitle"))
+      assert.is_false(printedContains(env, "error in"))
+    end)
+  end)
+
   describe("settings and options panel", function()
     -- widgetClient returns load() overrides: a Settings API stub (recording the registered
     -- category and what was opened) and CreateFrame making plain widgets for the panel.
@@ -3232,10 +3740,24 @@ describe("GroupChevron", function()
       end
       if not opts.noSettings then
         overrides.Settings = {
+          -- rec.frame / rec.name: the first category registered (GroupChevron's own); rec.pages:
+          -- name -> frame of every page, sub-categories included; rec.subs: sub-category names.
           RegisterCanvasLayoutCategory = function(frame, name)
-            rec.frame, rec.name = frame, name
-            return { GetID = function() return 42 end }
+            if not rec.frame then
+              rec.frame, rec.name = frame, name
+            end
+            rec.pages = rec.pages or {}
+            rec.pages[name] = frame
+            return { GetID = function() return 42 end, name = name }
           end,
+          RegisterCanvasLayoutSubcategory = not opts.noSubcategories and function(cat, frame, name)
+            assert(cat.name == "GroupChevron")
+            rec.subs = rec.subs or {}
+            rec.subs[#rec.subs + 1] = name
+            rec.pages = rec.pages or {}
+            rec.pages[name] = frame
+            return { GetID = function() return 43 end }
+          end or nil,
           RegisterAddOnCategory = function(cat) rec.category = cat end,
           OpenToCategory = function(id)
             if opts.openFails then
@@ -3264,11 +3786,41 @@ describe("GroupChevron", function()
       end
     end
 
+    -- page returns the content frame (the scroll child) of the options page called name.
+    local function page(rec, name)
+      for _, c in ipairs(rec.created) do
+        if c.kind == "ScrollFrame" and c.parent == rec.pages[name] then
+          return c.f.scrollChild
+        end
+      end
+    end
+
+    -- resetButton returns the Reset button of the options page called name.
+    local function resetButton(rec, name)
+      local content = page(rec, name)
+      for _, c in ipairs(rec.created) do
+        if c.kind == "Button" and c.parent == content and c.f.text == "Reset to defaults" then
+          return c.f
+        end
+      end
+    end
+
+    -- labelY returns the y of the first label of content whose text starts with prefix.
+    local function labelY(content, prefix)
+      for _, l in ipairs(content.labels) do
+        if l.text and l.text:sub(1, #prefix) == prefix then
+          return l.points[1][5]
+        end
+      end
+    end
+
     it("registers the panel and opens it with /gchev options", function()
       local overrides, rec = widgetClient()
       local env = load({ overrides = overrides })
       assert.are.equal("GroupChevron", rec.name)
       assert.is_table(rec.category)
+      -- Its pages are sub-categories, in this order.
+      assert.are.same({ "Main", "Friendly players", "Quest mobs", "NPCs" }, rec.subs)
       env.slash("options")
       assert.are.same({ 42 }, rec.opened)
       env.slash("")
@@ -3343,90 +3895,114 @@ describe("GroupChevron", function()
       end
     end)
 
-    it("puts the options in a scroll frame whose child holds every widget", function()
+    it("gives each page a scroll frame whose child holds its widgets", function()
       local overrides, rec = widgetClient()
       load({ overrides = overrides })
-      local scroll
-      for _, c in ipairs(rec.created) do
-        if c.kind == "ScrollFrame" then
-          scroll = c
-        end
+      local contents = {}
+      for _, name in ipairs({ "GroupChevron", "Main", "Friendly players", "Quest mobs", "NPCs" }) do
+        local content = page(rec, name)
+        assert.is_table(content, name)
+        assert.are_not.equal(rec.pages[name], content)
+        contents[content] = name
       end
-      assert.is_table(scroll)
-      assert.are.equal("UIPanelScrollFrameTemplate", scroll.template)
-      assert.are.equal(rec.frame, scroll.parent)
-      local content = scroll.f.scrollChild
-      assert.is_table(content)
-      assert.are_not.equal(rec.frame, content)
       for _, kind in ipairs({ "CheckButton", "Slider", "Button" }) do
         for _, c in ipairs(rec.created) do
           if c.kind == kind then
-            assert.are.equal(content, c.parent)
+            assert.is_string(contents[c.parent])
           end
         end
+      end
+      -- Main: Enabled, the name font and Reset; the category itself only says where to go.
+      assert.are.equal(page(rec, "Main"), widget(rec, "CheckButton", 1).parent)
+      assert.are.equal(page(rec, "Main"), widget(rec, "Button", 2).parent)
+      assert.is_number(labelY(page(rec, "Main"), "Name font"))
+      assert.is_number(labelY(page(rec, "GroupChevron"), "Choose a section"))
+      assert.are.equal("GroupChevron - Quest mobs", page(rec, "Quest mobs").labels[1].text)
+    end)
+
+    it("anchors each chevron preview on its own page, even once the panel is built", function()
+      local overrides, rec = widgetClient()
+      load({ overrides = overrides })
+      rec.frame.scripts.OnShow(rec.frame)
+      for name, count in pairs({ ["Friendly players"] = 3, ["Quest mobs"] = 1 }) do
+        local content = page(rec, name)
+        local vs = 0
+        for _, t in ipairs(content.textures) do
+          if t.texture == "Interface\\AddOns\\GroupChevron\\chevron.tga" and t.vertex and t.vertex[1] ~= 0 then
+            vs = vs + 1
+            assert.are.equal(content, t.points[1][2], name)
+          end
+        end
+        -- A double chevron per section on the players' page, a single one for the quest mobs.
+        assert.are.equal(name == "Quest mobs" and 1 or 2 * count, vs, name)
       end
     end)
 
-    it("orders the sections Members, Friends, Guildmates, Quest hostiles, Friendlies, Reset", function()
+    it("falls back to one category per page without sub-categories", function()
+      local overrides, rec = widgetClient({ noSubcategories = true })
+      local env = load({ overrides = overrides })
+      assert.are.equal("GroupChevron", rec.name)
+      for _, name in ipairs({ "Main", "Friendly players", "Quest mobs", "NPCs" }) do
+        assert.is_table(rec.pages["GroupChevron - " .. name], name)
+      end
+      assert.is_false(printedContains(env, "error in"))
+    end)
+
+    it("orders the sections of each page from the top down", function()
       local overrides, rec = widgetClient()
       load({ overrides = overrides })
-      local content
-      for _, c in ipairs(rec.created) do
-        if c.kind == "ScrollFrame" then
-          content = c.f.scrollChild
-        end
-      end
-      local function labelY(prefix)
-        for _, l in ipairs(content.labels) do
-          if l.text and l.text:sub(1, #prefix) == prefix then
-            return l.points[1][5]
-          end
-        end
-      end
-      local members = labelY("Group members")
-      local friendlies = labelY("Friendlies")
-      local friends = labelY("Friends")
-      local guild = labelY("Guildmates")
-      local hostiles = labelY("Quest hostiles")
+      -- Friendly players: Members, Friends, Guildmates, Friendlies.
+      local players = page(rec, "Friendly players")
+      local members, friends = labelY(players, "Group members"), labelY(players, "Friends")
+      local guild, friendlies = labelY(players, "Guildmates"), labelY(players, "Friendlies")
       assert.is_number(members)
-      assert.is_true(members > friends)
-      assert.is_true(friends > guild)
-      assert.is_true(guild > hostiles)
-      assert.is_true(hostiles > friendlies)
-      -- Reset sits below the last section.
-      local reset = widget(rec, "Button", 2)
-      assert.is_true(friendlies > reset.points[1][5])
+      assert.is_true(members > friends and friends > guild and guild > friendlies)
+      assert.is_number(labelY(page(rec, "Quest mobs"), "Quest hostiles"))
+      -- NPCs: the nameplates setting first, alone on its row.
+      local npcs = page(rec, "NPCs")
+      local services = labelY(npcs, "Friendly NPCs")
+      local plates = labelY(npcs, "Friendly NPC nameplates")
+      local icons = labelY(npcs, "Show role icons (Beta)")
+      assert.is_true(services > plates and plates > icons)
+      local onRow = 0
+      for _, l in ipairs(npcs.labels) do
+        if l.points[1][5] == plates then
+          onRow = onRow + 1
+        end
+      end
+      assert.are.equal(1, onRow)
     end)
 
-    it("draws one bordered frame per option group, without overlap, above the Reset button", function()
+    it("draws one bordered frame per option group, without overlap on its page", function()
       local overrides, rec = widgetClient()
       load({ overrides = overrides })
-      local content
-      for _, c in ipairs(rec.created) do
-        if c.kind == "ScrollFrame" then
-          content = c.f.scrollChild
+      local total = 0
+      for name, count in pairs({ ["Friendly players"] = 4, ["Quest mobs"] = 1, NPCs = 1 }) do
+        local content = page(rec, name)
+        local boxes = {}
+        for _, c in ipairs(rec.created) do
+          if c.kind == "Frame" and c.parent == content then
+            boxes[#boxes + 1] = c.f
+          end
         end
-      end
-      local boxes = {}
-      for _, c in ipairs(rec.created) do
-        if c.kind == "Frame" and c.parent == content then
-          boxes[#boxes + 1] = c.f
+        assert.are.equal(count, #boxes, name)
+        total = total + #boxes
+        -- Created in a different order than they are laid out: from the top down.
+        table.sort(boxes, function(a, b) return a.points[1][5] > b.points[1][5] end)
+        for i, b in ipairs(boxes) do
+          -- No SetBackdrop in the fake client: the four texture lines are the border.
+          assert.are.equal(4, #b.textures)
+          if i > 1 then
+            local prev = boxes[i - 1]
+            assert.is_true(prev.points[1][5] - prev.h > b.points[1][5])
+          end
         end
+        -- Each page's own Reset button sits below its last section.
+        local last, reset = boxes[#boxes], resetButton(rec, name)
+        assert.is_true(last.points[1][5] - last.h > reset.points[1][5], name)
       end
-      assert.are.equal(5, #boxes)
-      -- Created in a different order than they are laid out: from the top down.
-      table.sort(boxes, function(a, b) return a.points[1][5] > b.points[1][5] end)
-      for i, b in ipairs(boxes) do
-        -- No SetBackdrop in the fake client: the four texture lines are the border.
-        assert.are.equal(4, #b.textures)
-        if i > 1 then
-          local prev = boxes[i - 1]
-          assert.is_true(prev.points[1][5] - prev.h > b.points[1][5])
-        end
-      end
-      local last = boxes[5]
-      local reset = widget(rec, "Button", 2)
-      assert.is_true(last.points[1][5] - last.h > reset.points[1][5])
+      assert.are.equal(6, total)
+      assert.is_table(resetButton(rec, "Main"))
     end)
 
     it("uses SetBackdrop for the frame border when the client has it", function()
@@ -3441,7 +4017,7 @@ describe("GroupChevron", function()
         return decorate(f, kind, parent, template)
       end
       load({ overrides = overrides })
-      assert.are.equal(5, #seen)
+      assert.are.equal(6, #seen)
       assert.are.equal(1, seen[1].edgeSize)
       assert.is_not_nil(rec.created)
     end)
@@ -3561,7 +4137,27 @@ describe("GroupChevron", function()
       assert.are.equal(7, env.GroupChevronDB.hostilenamegap)
       hostileGap.scripts.OnValueChanged(hostileGap, 41)
       assert.are.equal(7, env.GroupChevronDB.hostilenamegap)
-      assert.is_nil(widget(rec, "Slider", 18))
+      -- The last ones are the friendly NPCs' text size (1..3) and icon size (1..15).
+      local npcText, iconSize = widget(rec, "Slider", 18), widget(rec, "Slider", 19)
+      npcText.scripts.OnValueChanged(npcText, 2)
+      assert.are.equal(2, env.GroupChevronDB.npcsize)
+      npcText.scripts.OnValueChanged(npcText, 3.5)
+      assert.are.equal(2, env.GroupChevronDB.npcsize)
+      iconSize.scripts.OnValueChanged(iconSize, 12)
+      assert.are.equal(12, env.GroupChevronDB.npciconsize)
+      iconSize.scripts.OnValueChanged(iconSize, 15.5)
+      assert.are.equal(12, env.GroupChevronDB.npciconsize)
+      -- Then the friendly NPCs' name height (-10..40).
+      local npcGap = widget(rec, "Slider", 20)
+      npcGap.scripts.OnValueChanged(npcGap, 8)
+      assert.are.equal(8, env.GroupChevronDB.npcnamegap)
+      -- Then the friends' and guildmates' text sizes (1..3).
+      local friendText, guildText = widget(rec, "Slider", 21), widget(rec, "Slider", 22)
+      friendText.scripts.OnValueChanged(friendText, 2.5)
+      assert.are.equal(2.5, env.GroupChevronDB.friendsize)
+      guildText.scripts.OnValueChanged(guildText, 1.25)
+      assert.are.equal(1.25, env.GroupChevronDB.guildsize)
+      assert.is_nil(widget(rec, "Slider", 23))
       assert.are.equal(2.25, env.GroupChevronDB.textsize)
 
       -- The panel shows the saved gaps when it opens.
@@ -3586,7 +4182,7 @@ describe("GroupChevron", function()
       assert.are.equal("#00FF00", hex(env.GroupChevronDB.color))
     end)
 
-    it("resets everything with the button, but /gchev reset only the colour", function()
+    it("resets each page with its own button, and /gchev reset only the colour", function()
       local overrides, rec = widgetClient()
       local env = load({ overrides = overrides })
       env.slash("color #00ff00")
@@ -3612,13 +4208,23 @@ describe("GroupChevron", function()
       assert.is_false(env.GroupChevronDB.enabled)
 
       env.slash("color #00ff00")
-      local button = widget(rec, "Button", 2)
+      env.slash("font chat")
+      -- Friendly players: only that page's settings.
+      local button = resetButton(rec, "Friendly players")
       button.scripts.OnClick(button)
       local db = env.GroupChevronDB
+      assert.are.equal(2, db.hostilechevsize)
+      assert.are.equal("chat", db.font)
+      assert.is_false(db.enabled)
+      assert.is_true(db.compact)
+      button = resetButton(rec, "Quest mobs")
+      button.scripts.OnClick(button)
+      button = resetButton(rec, "Main")
+      button.scripts.OnClick(button)
       assert.are.equal("#FF4FD8", hex(db.color))
       assert.are.equal(3, db.chevsize)
       assert.are.equal(1.75, db.textsize)
-      assert.are.equal(1, db.othersize)
+      assert.are.equal(1.5, db.othersize)
       assert.are.equal(1, db.barsize)
       assert.are.equal(1.1, db.buffsize)
       assert.are.equal(1, db.otherbarsize)
@@ -3626,7 +4232,7 @@ describe("GroupChevron", function()
       assert.are.equal(5, db.othernamegap)
       assert.are.equal("#FFFF00", hex(db.hostilecolor))
       assert.are.equal(3, db.hostilechevsize)
-      assert.are.equal(1, db.hostilesize)
+      assert.are.equal(1.5, db.hostilesize)
       assert.are.equal(5, db.hostilenamegap)
       assert.are.equal("outline", db.font)
       assert.is_true(db.classcolor)
@@ -3687,7 +4293,7 @@ describe("GroupChevron", function()
       -- Reset to defaults covers the friend settings too.
       env.slash("friendcolor #00ff00")
       env.slash("friendchevron off")
-      local button = widget(rec, "Button", 2)
+      local button = resetButton(rec, "Friendly players")
       button.scripts.OnClick(button)
       local db = env.GroupChevronDB
       assert.are.equal("#3FA7FF", hex(db.friendcolor))
@@ -3715,7 +4321,7 @@ describe("GroupChevron", function()
       assert.is_true(chevronBox.checked)
       env.slash("guildcolor #ff0000")
       env.slash("guildchevron off")
-      local button = widget(rec, "Button", 2)
+      local button = resetButton(rec, "Friendly players")
       button.scripts.OnClick(button)
       assert.are.equal("#40FF40", hex(env.GroupChevronDB.guildcolor))
       assert.is_true(env.GroupChevronDB.guildchevron)
@@ -3742,7 +4348,7 @@ describe("GroupChevron", function()
       assert.is_false(classBox.checked)
       assert.are.same(BLUE, plate.UnitFrame.name.color)
 
-      local button = widget(rec, "Button", 2)
+      local button = resetButton(rec, "Friendly players")
       button.scripts.OnClick(button)
       assert.is_true(env.GroupChevronDB.classcolor)
       assert.is_true(classBox.checked)
@@ -3803,7 +4409,7 @@ describe("GroupChevron", function()
       rec.frame.scripts.OnShow(rec.frame)
       assert.is_true(levelBox.checked)
       env.slash("level off")
-      local button = widget(rec, "Button", 2)
+      local button = resetButton(rec, "Friendly players")
       button.scripts.OnClick(button)
       assert.is_true(env.GroupChevronDB.showlevel)
       assert.is_true(levelBox.checked)
@@ -3841,7 +4447,7 @@ describe("GroupChevron", function()
       env.slash("font nonsense")
       assert.are.equal("large", env.GroupChevronDB.font)
 
-      local reset = widget(rec, "Button", 2)
+      local reset = resetButton(rec, "Main")
       reset.scripts.OnClick(reset)
       assert.are.equal("outline", env.GroupChevronDB.font)
       assert.are.equal(OUTLINE, label.fontObject)
@@ -3857,7 +4463,13 @@ describe("GroupChevron", function()
       local env = load({ overrides = overrides })
       rec.frame.scripts.OnShow(rec.frame)
       assert.are.equal(Core.FONTS[1].label, texts[#texts])
-      assert.is_nil(widget(rec, "Button", 6)) -- no fallback button (Button 5 is the hostile swatch)
+      -- No fallback font button (Buttons 1 to 5 are the swatches and Main's Reset; the other pages'
+      -- Reset buttons come after).
+      for _, c in ipairs(rec.created) do
+        if c.kind == "Button" then
+          assert.are_not.equal(Core.FONTS[1].label, c.f.text)
+        end
+      end
 
       init()
       assert.are.equal(#Core.FONTS, #added)
@@ -3874,7 +4486,7 @@ describe("GroupChevron", function()
       env.slash("font outline")
       rec.frame.scripts.OnShow(rec.frame)
       assert.are.equal(Core.FONTS[2].label, texts[#texts])
-      local reset = widget(rec, "Button", 2)
+      local reset = resetButton(rec, "Main")
       reset.scripts.OnClick(reset)
       rec.frame.scripts.OnShow(rec.frame)
       assert.are.equal(Core.FONTS[2].label, texts[#texts]) -- the default font is "outline"

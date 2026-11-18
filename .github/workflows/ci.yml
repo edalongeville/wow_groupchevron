@@ -32,6 +32,9 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y -qq lua5.1 lua-check lua-busted
 
+      - name: Shipped NPC roles in the generated form
+        run: python3 tools/npc_roles.py --check
+
       - name: Lint (luacheck)
         run: luacheck .
 

@@ -94,14 +94,17 @@ Core.MIN_FACTOR = 1
 Core.MIN_FACTORS = { memberoutlinesize = 0, friendoutlinesize = 0, guildoutlinesize = 0, hostileoutlinesize = 0 }
 Core.DEFAULT_MAX_FACTOR = 3
 Core.MAX_FACTORS = { chevsize = 5, hostilechevsize = 5, friendchevsize = 5, guildchevsize = 5,
-  memberoutlinesize = 5, friendoutlinesize = 5, guildoutlinesize = 5, hostileoutlinesize = 5 }
+  memberoutlinesize = 5, friendoutlinesize = 5, guildoutlinesize = 5, hostileoutlinesize = 5, npciconsize = 15 }
 Core.DEFAULT_FACTOR = 1
 -- DEFAULT_FACTORS are the defaults of the kinds that do not start at DEFAULT_FACTOR (1, which
 -- also stays the "no scaling" value the plates compare against). The hostiles start where the
--- friendlies do: the chevron at the size the friends' chevron has (chevsize), the text at 1.
-Core.DEFAULT_FACTORS = { chevsize = 3, textsize = 1.75, buffsize = 1.1, hostilechevsize = 3, friendchevsize = 3,
-  guildchevsize = 3, memberoutlinesize = 2,
-  friendoutlinesize = 2, guildoutlinesize = 2, hostileoutlinesize = 2 }
+-- friendlies do: the chevron at the size the friends' chevron has (chevsize), the text at 1.5 like the
+-- friendlies' othersize (both since 0.23.0); friends and guildmates have their own text sizes
+-- (friendsize, guildsize), at the members' 1.75.
+Core.DEFAULT_FACTORS = { chevsize = 3, textsize = 1.75, buffsize = 1.1, othersize = 1.5, hostilesize = 1.5,
+  friendsize = 1.75, guildsize = 1.75, hostilechevsize = 3,
+  friendchevsize = 3, guildchevsize = 3, memberoutlinesize = 2,
+  friendoutlinesize = 2, guildoutlinesize = 2, hostileoutlinesize = 2, npciconsize = 5 }
 
 -- DefaultFactor is the default of a factor kind: its DEFAULT_FACTORS entry, else DEFAULT_FACTOR.
 function Core.DefaultFactor(kind)
@@ -160,7 +163,7 @@ Core.MIN_GAP = -10
 Core.MAX_GAP = 40
 Core.NO_GAP = 0
 Core.DEFAULT_GAP = 5
-Core.GAP_KINDS = { namegap = true, othernamegap = true, hostilenamegap = true }
+Core.GAP_KINDS = { namegap = true, othernamegap = true, hostilenamegap = true, npcnamegap = true }
 
 -- DefaultGap is the default of a gap kind.
 function Core.DefaultGap(_)
@@ -292,6 +295,15 @@ Core.Locales = {
     bnet_friends = "Include Battle.net friends",
     class_colour = "Class colour",
     show_level = "Show level",
+    services = "Friendly NPCs",
+    show_icons = "Show role icons",
+    icon_size = "Icon size",
+    npc_plates = "Friendly NPC nameplates",
+    page_main = "Main",
+    page_players = "Friendly players",
+    page_quests = "Quest mobs",
+    page_npcs = "NPCs",
+    choose_section = "Choose a section on the left.",
   },
   frFR = {
     enabled = "Activé",
@@ -314,6 +326,15 @@ Core.Locales = {
     bnet_friends = "Inclure les amis Battle.net",
     class_colour = "Couleur de classe",
     show_level = "Afficher le niveau",
+    services = "PNJ amicaux",
+    show_icons = "Afficher les icônes de rôle",
+    icon_size = "Taille des icônes",
+    npc_plates = "Plaques des PNJ amicaux",
+    page_main = "Principal",
+    page_players = "Joueurs amicaux",
+    page_quests = "Monstres de quête",
+    page_npcs = "PNJ",
+    choose_section = "Choisissez une section à gauche.",
   },
   deDE = {
     enabled = "Aktiviert",
@@ -336,6 +357,15 @@ Core.Locales = {
     bnet_friends = "Battle.net-Freunde einbeziehen",
     class_colour = "Klassenfarbe",
     show_level = "Stufe anzeigen",
+    services = "Freundliche NSCs",
+    show_icons = "Rollensymbole anzeigen",
+    icon_size = "Symbolgröße",
+    npc_plates = "Plaketten freundlicher NSCs",
+    page_main = "Allgemein",
+    page_players = "Freundliche Spieler",
+    page_quests = "Quest-Gegner",
+    page_npcs = "NSCs",
+    choose_section = "Wähle links einen Bereich.",
   },
   esES = {
     enabled = "Activado",
@@ -358,6 +388,15 @@ Core.Locales = {
     bnet_friends = "Incluir amigos de Battle.net",
     class_colour = "Color de clase",
     show_level = "Mostrar nivel",
+    services = "PNJ amistosos",
+    show_icons = "Mostrar iconos de función",
+    icon_size = "Tamaño del icono",
+    npc_plates = "Placas de PNJ amistosos",
+    page_main = "General",
+    page_players = "Jugadores amistosos",
+    page_quests = "Enemigos de misión",
+    page_npcs = "PNJ",
+    choose_section = "Elige una sección a la izquierda.",
   },
   itIT = {
     enabled = "Attivo",
@@ -380,6 +419,15 @@ Core.Locales = {
     bnet_friends = "Includi amici Battle.net",
     class_colour = "Colore classe",
     show_level = "Mostra livello",
+    services = "PNG amichevoli",
+    show_icons = "Mostra icone del ruolo",
+    icon_size = "Dimensione icona",
+    npc_plates = "Targhette dei PNG amichevoli",
+    page_main = "Generale",
+    page_players = "Giocatori amichevoli",
+    page_quests = "Nemici delle missioni",
+    page_npcs = "PNG",
+    choose_section = "Scegli una sezione a sinistra.",
   },
   ptBR = {
     enabled = "Ativado",
@@ -402,6 +450,15 @@ Core.Locales = {
     bnet_friends = "Incluir amigos do Battle.net",
     class_colour = "Cor da classe",
     show_level = "Mostrar nível",
+    services = "PNJs amistosos",
+    show_icons = "Mostrar ícones de função",
+    icon_size = "Tamanho do ícone",
+    npc_plates = "Placas de PNJs amistosos",
+    page_main = "Geral",
+    page_players = "Jogadores amistosos",
+    page_quests = "Inimigos de missão",
+    page_npcs = "PNJs",
+    choose_section = "Escolha uma seção à esquerda.",
   },
   ruRU = {
     enabled = "Включено",
@@ -424,6 +481,15 @@ Core.Locales = {
     bnet_friends = "Учитывать друзей Battle.net",
     class_colour = "Цвет класса",
     show_level = "Показать уровень",
+    services = "Дружественные НИП",
+    show_icons = "Показать значки ролей",
+    icon_size = "Размер значка",
+    npc_plates = "Индикаторы дружественных НИП",
+    page_main = "Основное",
+    page_players = "Дружественные игроки",
+    page_quests = "Цели заданий",
+    page_npcs = "НИП",
+    choose_section = "Выберите раздел слева.",
   },
   koKR = {
     enabled = "사용",
@@ -446,6 +512,15 @@ Core.Locales = {
     bnet_friends = "Battle.net 친구 포함",
     class_colour = "직업 색상",
     show_level = "레벨 표시",
+    services = "우호적 NPC",
+    show_icons = "역할 아이콘 표시",
+    icon_size = "아이콘 크기",
+    npc_plates = "우호적 NPC 이름표",
+    page_main = "일반",
+    page_players = "우호적 플레이어",
+    page_quests = "퀘스트 몹",
+    page_npcs = "NPC",
+    choose_section = "왼쪽에서 항목을 선택하세요.",
   },
   zhCN = {
     enabled = "启用",
@@ -468,6 +543,15 @@ Core.Locales = {
     bnet_friends = "包括战网好友",
     class_colour = "职业颜色",
     show_level = "显示等级",
+    services = "友方NPC",
+    show_icons = "显示职能图标",
+    icon_size = "图标大小",
+    npc_plates = "友方NPC姓名板",
+    page_main = "常规",
+    page_players = "友方玩家",
+    page_quests = "任务怪物",
+    page_npcs = "NPC",
+    choose_section = "请在左侧选择一个分类。",
   },
   zhTW = {
     enabled = "啟用",
@@ -490,6 +574,15 @@ Core.Locales = {
     bnet_friends = "包含Battle.net好友",
     class_colour = "職業顏色",
     show_level = "顯示等級",
+    services = "友方NPC",
+    show_icons = "顯示職能圖示",
+    icon_size = "圖示大小",
+    npc_plates = "友方NPC名條",
+    page_main = "一般",
+    page_players = "友方玩家",
+    page_quests = "任務怪物",
+    page_npcs = "NPC",
+    choose_section = "請在左側選擇一個分類。",
   },
 }
 -- Locales of the client that share another one's texts: enGB is English, esMX (Latin American
@@ -529,12 +622,13 @@ function Core.InitDB(db)
   end
   for _, key in ipairs({ "chevsize", "textsize", "othersize", "barsize", "buffsize", "otherbarsize",
     "hostilechevsize", "hostilesize", "friendchevsize", "guildchevsize", "memberoutlinesize",
-    "friendoutlinesize", "guildoutlinesize", "hostileoutlinesize" }) do
+    "friendoutlinesize", "guildoutlinesize", "hostileoutlinesize", "npciconsize", "npcsize", "friendsize",
+    "guildsize" }) do
     if not Core.ValidFactor(db[key], key) then
       db[key] = Core.DefaultFactor(key)
     end
   end
-  for _, key in ipairs({ "namegap", "othernamegap", "hostilenamegap" }) do
+  for _, key in ipairs({ "namegap", "othernamegap", "hostilenamegap", "npcnamegap" }) do
     if not Core.ValidGap(db[key]) then
       db[key] = Core.DefaultGap(key)
     end
@@ -568,7 +662,7 @@ function Core.InitDB(db)
   else
     db.hostilecolor = { db.hostilecolor[1], db.hostilecolor[2], db.hostilecolor[3] }
   end
-  for _, key in ipairs({ "friendchevron", "bnetfriends", "guildchevron", "showlevel" }) do
+  for _, key in ipairs({ "friendchevron", "bnetfriends", "guildchevron", "showlevel", "npcicons", "npccompact" }) do
     if type(db[key]) ~= "boolean" then
       db[key] = true
     end
@@ -576,7 +670,37 @@ function Core.InitDB(db)
   if type(db.classcolor) ~= "boolean" then
     db.classcolor = Core.DEFAULT_CLASSCOLOR
   end
+  db.npcroles = Core.CleanRoles(db.npcroles)
+  db.roleicons = Core.CleanRoleIcons(db.roleicons)
   return db
+end
+
+-- PAGE_KEYS are the saved settings of each options page, which its Reset button puts back to
+-- their defaults (ResetPage). Every setting InitDB fills in is on exactly one page, except the
+-- data the addon keeps (npcroles, roleicons, npcplatesnoticed), which no button resets.
+Core.PAGE_KEYS = {
+  main = { "enabled", "font" },
+  players = { "compact", "color", "friendcolor", "friendchevron", "bnetfriends", "guildcolor", "guildchevron",
+    "classcolor", "showlevel", "chevsize", "textsize", "othersize", "barsize", "buffsize", "otherbarsize",
+    "friendchevsize", "guildchevsize", "memberoutlinesize", "friendoutlinesize", "guildoutlinesize", "namegap",
+    "othernamegap", "friendsize", "guildsize" },
+  quests = { "hostilecolor", "hostilechevsize", "hostilesize", "hostileoutlinesize", "hostilenamegap" },
+  npcs = { "npcicons", "npccompact", "npcsize", "npciconsize", "npcnamegap" },
+}
+
+-- ResetPage puts the settings of the options page page (a key of PAGE_KEYS) back to their
+-- defaults in db, and leaves every other setting as it is. It returns false (nothing changed)
+-- for an unknown page or a db that is not a table.
+function Core.ResetPage(db, page)
+  local keys = type(page) == "string" and Core.PAGE_KEYS[page] or nil
+  if type(db) ~= "table" or not keys then
+    return false
+  end
+  for _, key in ipairs(keys) do
+    db[key] = nil
+  end
+  Core.InitDB(db)
+  return true
 end
 
 -- isSecret is true when api.issecretvalue flags v (or fails on it).
@@ -752,6 +876,364 @@ function Core.QuestLookup(api, unit)
   return false, "none"
 end
 
+-- ---------------------------------------------------------------------------------------
+-- Service NPCs: friendly NPCs with a role (flight master, innkeeper, vendor, repairer...) get
+-- a role icon above their name.
+--
+-- ROLES lists the roles in priority order (an NPC with two roles shows the first one: an
+-- innkeeper who also sells food shows the innkeeper icon, a vendor who repairs the repair one),
+-- with the default icon of each: an atlas of the client's map / minimap point-of-interest icons
+-- (32 x 32, all in atlas 647, FileDataID 1121272), names checked in UiTextureAtlasMember for the
+-- Forever build 1.60.1.70959 (wago.tools). Class and profession trainers are two roles (two
+-- icons); vendors get the bag of the level-up screen ("levelup-icon-bag", the player's choice).
+-- The player can pick another icon per role (/gchev icon); a missing atlas shows no icon. The
+-- first builds used the minimap tracking textures (too low-res once enlarged), then 64 x 64
+-- Interface\Icons spell and item icons (the wrong pictures).
+Core.ROLES = {
+  { key = "flight", icon = "flightmaster" },
+  { key = "innkeeper", icon = "innkeeper" },
+  { key = "banker", icon = "banker" },
+  { key = "auctioneer", icon = "auctioneer" },
+  { key = "stable", icon = "stablemaster" },
+  { key = "profession", icon = "profession" },
+  { key = "trainer", icon = "class" },
+  { key = "repair", icon = "repair" },
+  { key = "vendor", icon = "levelup-icon-bag" },
+}
+
+-- ICON_CROP is the part of an Interface\Icons texture kept (SetTexCoord left, right, top,
+-- bottom): its bevelled border is cut off. Any other texture is shown whole (FULL_CROP).
+Core.ICON_CROP = { 0.07, 0.93, 0.07, 0.93 }
+Core.FULL_CROP = { 0, 1, 0, 1 }
+
+-- An icon is either a texture path (it has a "\" or a "/", e.g. Interface\Icons\INV_Misc_Coin_01)
+-- or the name of one of the client's atlases (e.g. FlightMaster). The player can choose the
+-- icon of each role (/gchev icon <role> <name>, saved in db.roleicons).
+
+-- IsTexturePath is true when name is a texture path rather than an atlas name.
+function Core.IsTexturePath(name)
+  return type(name) == "string" and name:find("[\\/]") ~= nil
+end
+
+-- ValidIconName is true for a texture path or atlas name: 1 to 200 letters, digits, "_", "-",
+-- ".", "\" or "/".
+function Core.ValidIconName(name)
+  return type(name) == "string" and #name >= 1 and #name <= 200 and name:match("^[%w_%-%.\\/]+$") ~= nil
+end
+
+-- IconCrop returns the SetTexCoord values of an icon: ICON_CROP for an Interface\Icons texture,
+-- else FULL_CROP.
+function Core.IconCrop(name)
+  if Core.IsTexturePath(name) and name:lower():gsub("/", "\\"):find("^interface\\icons\\") then
+    return Core.ICON_CROP
+  end
+  return Core.FULL_CROP
+end
+
+local rolePriority = {}
+for i, r in ipairs(Core.ROLES) do
+  rolePriority[r.key] = i
+end
+
+-- ValidRole is true for the key of one of ROLES.
+function Core.ValidRole(role)
+  return type(role) == "string" and rolePriority[role] ~= nil
+end
+
+-- RoleIcon returns the texture of role's icon, or nil for an unknown role.
+function Core.RoleIcon(role)
+  local i = type(role) == "string" and rolePriority[role]
+  return i and Core.ROLES[i].icon or nil
+end
+
+-- BetterRole returns whichever of a and b comes first in ROLES (an invalid one never wins; nil
+-- when neither is valid).
+function Core.BetterRole(a, b)
+  if not Core.ValidRole(a) then
+    return Core.ValidRole(b) and b or nil
+  end
+  if not Core.ValidRole(b) then
+    return a
+  end
+  return rolePriority[a] <= rolePriority[b] and a or b
+end
+
+-- SUBTITLES are, by client locale, the words of an NPC's subtitle (the "<Gryphon Master>" line,
+-- lower case, plain substrings) that give its role, in ROLES order. A word may be a list of
+-- substrings that must all be in the subtitle. Only enUS (enGB shares it) and
+-- frFR have words: on other clients only the roles learned from windows you open count. Of the
+-- French words, only "Maître des gryphons" is checked in game.
+Core.SUBTITLES = {
+  enUS = {
+    { "flight", { "gryphon master", "wind rider master", "hippogryph master", "bat handler", "flight master" } },
+    { "innkeeper", { "innkeeper" } },
+    { "banker", { "banker" } },
+    { "auctioneer", { "auctioneer" } },
+    { "stable", { "stable master" } },
+    -- "<Profession> Trainer" before any other trainer ("Tailoring Supplies" is a vendor).
+    { "profession", { "alchemy trainer", "blacksmithing trainer", "enchanting trainer", "engineering trainer",
+      "herbalism trainer", "leatherworking trainer", "mining trainer", "skinning trainer", "tailoring trainer",
+      "first aid trainer", "fishing trainer", "cooking trainer" } },
+    { "trainer", { "trainer" } },
+    { "repair", { "armorer", "weaponsmith", "repair" } },
+    { "vendor", { "vendor", "merchant", "supplies", "goods", "food & drink", "reagents", "provisioner",
+      "bowyer", "gunsmith" } },
+  },
+  frFR = {
+    -- The Forever client spells it "Maître des gryphons" (seen in game); the other spellings stay
+    -- in case some NPCs use them.
+    { "flight", { "gryphon", "griffon", "coursier du vent", "coursiers du vent", "hippogryphe", "hippogriffe",
+      "chauves-souris", "maître de vol", "maîtresse de vol" } },
+    { "innkeeper", { "aubergiste" } },
+    { "banker", { "banquier", "banquière" } },
+    { "auctioneer", { "commissaire-priseu" } },
+    { "stable", { "écuries" } },
+    -- Profession trainers read "<Profession> - <rank>" ("Enchanteur - compagnon", seen in game): a
+    -- profession name and " - " together, so "Fournitures d'enchanteur" stays a vendor.
+    { "profession", (function()
+      local out = {}
+      for _, name in ipairs({ "alchimiste", "forgeron", "forgeronne", "enchanteur", "enchanteresse", "ingénieur",
+        "ingénieure", "herboriste", "travailleur du cuir", "travailleuse du cuir", "mineur", "mineuse", "dépeceur",
+        "dépeceuse", "tailleur", "tailleuse", "couturier", "couturière", "secouriste", "pêcheur", "pêcheuse",
+        "cuisinier", "cuisinière" }) do
+        out[#out + 1] = { name, " - " }
+      end
+      return out
+    end)() },
+    { "trainer", { "entraîneu", "instructeur", "instructrice" } },
+    { "repair", { "armurier", "armurière", "réparation" } },
+    { "vendor", { "marchand", "vendeu", "fournitures", "provisions", "nourriture", "réactifs" } },
+  },
+}
+Core.SUBTITLES.enGB = Core.SUBTITLES.enUS
+
+-- SubtitleRole returns the role an NPC's subtitle gives in locale (see SUBTITLES), or nil (no
+-- subtitle, no words for the locale, or no word found).
+function Core.SubtitleRole(subtitle, locale)
+  local words = type(locale) == "string" and Core.SUBTITLES[locale] or nil
+  if type(subtitle) ~= "string" or subtitle == "" or not words then
+    return nil
+  end
+  local text = subtitle:lower()
+  local function has(word)
+    if type(word) == "table" then
+      for _, part in ipairs(word) do
+        if not text:find(part, 1, true) then
+          return false
+        end
+      end
+      return true
+    end
+    return text:find(word, 1, true) ~= nil
+  end
+  for _, entry in ipairs(words) do
+    for _, word in ipairs(entry[2]) do
+      if has(word) then
+        return entry[1]
+      end
+    end
+  end
+  return nil
+end
+
+-- NpcID returns the creature ID of an NPC's GUID ("Creature-0-<server>-<instance>-<zone>-<id>-<spawn>",
+-- also "Vehicle-"), or nil for any other GUID (players, pets, objects) or anything unreadable.
+function Core.NpcID(guid)
+  if type(guid) ~= "string" then
+    return nil
+  end
+  local kind, id = guid:match("^(%a+)%-%d+%-%d+%-%d+%-%d+%-(%d+)%-%x+$")
+  if kind ~= "Creature" and kind ~= "Vehicle" then
+    return nil
+  end
+  id = tonumber(id)
+  if not id or id <= 0 then
+    return nil
+  end
+  return id
+end
+
+-- CleanRoleIcons returns the player's icon choices (role key -> icon name) with every invalid
+-- entry dropped: a new table when icons is not a table.
+function Core.CleanRoleIcons(icons)
+  if type(icons) ~= "table" then
+    return {}
+  end
+  local bad = {}
+  for role, name in pairs(icons) do
+    if not Core.ValidRole(role) or not Core.ValidIconName(name) then
+      bad[#bad + 1] = role
+    end
+  end
+  for _, role in ipairs(bad) do
+    icons[role] = nil
+  end
+  return icons
+end
+
+-- CleanRoles returns the learned roles table (creature ID -> role key) with every invalid entry
+-- dropped: a new table when roles is not a table.
+function Core.CleanRoles(roles)
+  if type(roles) ~= "table" then
+    return {}
+  end
+  local bad = {}
+  for id, role in pairs(roles) do
+    if type(id) ~= "number" or id <= 0 or id ~= math.floor(id) or not Core.ValidRole(role) then
+      bad[#bad + 1] = id
+    end
+  end
+  for _, id in ipairs(bad) do
+    roles[id] = nil
+  end
+  return roles
+end
+
+-- SHIPPED_ROLES are the roles shipped with the addon (NpcRoles.lua, loaded before this file:
+-- ns.NpcRoles, creature ID -> role key), cleaned; empty outside the game or without the file.
+Core.SHIPPED_ROLES = Core.CleanRoles(type(ns) == "table" and ns.NpcRoles or nil)
+
+-- INTERACTIONS maps the windows an NPC opens (the interaction kinds the glue listens for) to the
+-- role they show; "merchant" is "repair" when the merchant can repair, "trainer" is "profession"
+-- when the trainer teaches a profession (InteractionRole).
+Core.INTERACTIONS = {
+  merchant = "vendor", taxi = "flight", banker = "banker", auctioneer = "auctioneer", trainer = "trainer",
+  stable = "stable", binder = "innkeeper",
+}
+
+-- InteractionRole returns the role an interaction of kind (see INTERACTIONS) shows, or nil. more
+-- is true when the merchant can repair (kind "merchant": CanMerchantRepair) or the trainer
+-- teaches a profession (kind "trainer": IsTradeskillTrainer).
+function Core.InteractionRole(kind, more)
+  local role = type(kind) == "string" and Core.INTERACTIONS[kind] or nil
+  if role == "vendor" and more == true then
+    return "repair"
+  elseif role == "trainer" and more == true then
+    return "profession"
+  end
+  return role
+end
+
+-- LearnRole records in roles (creature ID -> role key) that the NPC id has role, keeping the
+-- better of the old and the new role (BetterRole). It returns true when the table changed.
+function Core.LearnRole(roles, id, role)
+  if type(roles) ~= "table" or type(id) ~= "number" or id <= 0 or id ~= math.floor(id)
+    or not Core.ValidRole(role) then
+    return false
+  end
+  local best = Core.BetterRole(roles[id], role)
+  if best == roles[id] then
+    return false
+  end
+  roles[id] = best
+  return true
+end
+
+-- TooltipSubtitle returns the second line of unit's tooltip (api.GetTooltipUnit(unit), i.e.
+-- C_TooltipInfo.GetUnit: { lines = { { leftText = name }, { leftText = subtitle or level } } }),
+-- or nil when it cannot be read (missing function, error, secret value, not a string).
+function Core.TooltipSubtitle(api, unit)
+  if type(api) ~= "table" or type(unit) ~= "string" or unit == "" or isSecret(api, unit) then
+    return nil
+  end
+  local data = call(api, "GetTooltipUnit", unit)
+  if type(data) ~= "table" then
+    return nil
+  end
+  local ok, text = pcall(function() return data.lines[2].leftText end)
+  if not ok or isSecret(api, text) or type(text) ~= "string" or text == "" then
+    return nil
+  end
+  return text
+end
+
+-- GuildName returns the name of unit's guild (the first result of api.GetGuildInfo(unit)), or
+-- nil when it has none or it cannot be read (missing function, error, secret value, empty).
+function Core.GuildName(api, unit)
+  if type(api) ~= "table" or type(unit) ~= "string" or unit == "" or isSecret(api, unit) then
+    return nil
+  end
+  local name = call(api, "GetGuildInfo", unit)
+  if type(name) ~= "string" or name == "" then
+    return nil
+  end
+  return name
+end
+
+-- DEFAULT_NPC_COLOR is the friendly NPCs' name colour when the client gives none (a plain
+-- green, close to the game's own friendly name colour).
+Core.DEFAULT_NPC_COLOR = { 0.1, 1, 0.1 }
+
+-- ReactionColor returns the colour the client gives unit for selection (api.UnitSelectionColor:
+-- green for friendly, yellow for neutral), as r, g, b in 0..1, or nil when it cannot be read
+-- (missing function, error, secret value, not a colour).
+function Core.ReactionColor(api, unit)
+  if type(api) ~= "table" or type(api.UnitSelectionColor) ~= "function" or type(unit) ~= "string" or unit == ""
+    or isSecret(api, unit) then
+    return nil
+  end
+  local ok, r, g, b = pcall(api.UnitSelectionColor, unit)
+  if not ok or isSecret(api, r) or isSecret(api, g) or isSecret(api, b) or not isUnit(r) or not isUnit(g)
+    or not isUnit(b) then
+    return nil
+  end
+  return r, g, b
+end
+
+-- SubtitleLine returns the tooltip's second line (see TooltipSubtitle) when it is an NPC's
+-- subtitle ("Maître des gryphons"), or nil when it is the level line an NPC without a subtitle
+-- has there instead ("Level 12 Humanoid", "Niveau ?? Élite"): a line holding the NPC's level as a
+-- number of its own, or "??", is the level line. level is the NPC's level (Core.UnitLevel), or nil.
+function Core.SubtitleLine(text, level)
+  if type(text) ~= "string" or text == "" then
+    return nil
+  end
+  if text:find("??", 1, true) then
+    return nil
+  end
+  if finite(level) and level >= 1 and text:find("%f[%d]" .. string.format("%d", level) .. "%f[%D]") then
+    return nil
+  end
+  return text
+end
+
+-- ServiceLookup tells which role the NPC unit has: the better (BetterRole) of the role learned
+-- for its creature ID (learned: creature ID -> role, see LearnRole), the role shipped with the
+-- addon for it (SHIPPED_ROLES) and the role its subtitle gives in the client's locale
+-- (api.GetLocale). It returns the role (nil for none) and its source (on a tie, in this order):
+--   "learned"  : the learned role won;
+--   "shipped"  : the shipped role won;
+--   "subtitle" : the subtitle's role won;
+--   "none"     : no role (also when an API raises an error or returns a secret value).
+-- guid is the unit's GUID when the caller already read it (else it is asked here).
+function Core.ServiceLookup(api, unit, learned, guid)
+  if type(api) ~= "table" or type(unit) ~= "string" or unit == "" or isSecret(api, unit) then
+    return nil, "none"
+  end
+  if guid == nil then
+    guid = call(api, "UnitGUID", unit)
+  end
+  local id = not isSecret(api, guid) and Core.NpcID(guid) or nil
+  local fromLearned = id and type(learned) == "table" and learned[id] or nil
+  if not Core.ValidRole(fromLearned) then
+    fromLearned = nil
+  end
+  local fromShipped = id and Core.SHIPPED_ROLES[id] or nil
+  if not Core.ValidRole(fromShipped) then
+    fromShipped = nil
+  end
+  local fromSubtitle = Core.SubtitleRole(Core.TooltipSubtitle(api, unit), call(api, "GetLocale"))
+  local role = Core.BetterRole(Core.BetterRole(fromLearned, fromShipped), fromSubtitle)
+  if role == nil then
+    return nil, "none"
+  elseif role == fromLearned then
+    return role, "learned"
+  elseif role == fromShipped then
+    return role, "shipped"
+  end
+  return role, "subtitle"
+end
+
 -- readRGB returns the r, g, b (numbers in 0..1, none secret) of a class colour c: a ColorMixin
 -- (c:GetRGB()) or a table with fields r, g, b (RAID_CLASS_COLORS), or nil.
 local function readRGB(api, c)
@@ -863,6 +1345,10 @@ function Core.UnitInfo(api, unit, settings)
   local guid = call(api, "UnitGUID", unit)
   info.listed, info.source = Core.FriendLookup(api, guid, bnet)
   info.guild, info.guildSource = Core.GuildLookup(api, unit, guid)
+  if type(settings) == "table" and settings.npcicons == true and info.player == false and info.friend == true
+    and info.attackable == false then
+    info.service, info.serviceSource = Core.ServiceLookup(api, unit, settings.npcroles, guid)
+  end
   if type(settings) == "table" and settings.classcolor == true then
     local token, r, g, b = Core.ClassColor(api, unit)
     info.class = token
@@ -887,6 +1373,34 @@ function Core.QuestHostile(info, settings)
     return false
   end
   return info.attackable == true and info.self ~= true and info.quest == true
+end
+
+-- FriendlyNPC is true when info (see UnitInfo) is known to be a friendly NPC: not a player,
+-- friendly, not attackable (exact booleans only).
+function Core.FriendlyNPC(info)
+  return type(info) == "table" and info.player == false and info.friend == true and info.attackable == false
+end
+
+-- ServiceNPC is true when the plate of the unit described by info (see UnitInfo) is a friendly
+-- NPC (not a player, friendly, not attackable) with a known role (info.service, see
+-- ServiceLookup), the addon is on and settings.npcicons is on. Only exact boolean answers count.
+function Core.ServiceNPC(info, settings)
+  if type(info) ~= "table" or type(settings) ~= "table" or settings.enabled ~= true or settings.npcicons ~= true then
+    return false
+  end
+  return Core.FriendlyNPC(info) and Core.ValidRole(info.service)
+end
+
+-- NpcPlate is true when the addon has something to do on the plate of the friendly NPC described
+-- by info (see FriendlyNPC): a role icon (ServiceNPC), compact plates (settings.npccompact) or a
+-- name size other than 1 (settings.npcsize). Otherwise the plate stays Blizzard's.
+function Core.NpcPlate(info, settings)
+  if type(settings) ~= "table" or settings.enabled ~= true or not Core.FriendlyNPC(info) then
+    return false
+  end
+  local size = settings.npcsize
+  return Core.ServiceNPC(info, settings) or settings.npccompact == true
+    or (Core.ValidFactor(size, "npcsize") and size ~= Core.DEFAULT_FACTOR)
 end
 
 -- Relation returns how the player relates to the unit described by info (see UnitInfo), in
@@ -947,6 +1461,10 @@ end
 --   "quest"   : a hostile (attackable) unit tied to one of the player's active quests
 --               (QuestHostile): full plate, name in the hostile colour, single chevron; no
 --               relation (nil). Such a unit is never a member, friend or friendly player.
+--   "npc"     : a friendly NPC the addon has something to do on (NpcPlate): the name in
+--               Blizzard's colour at npcsize, the role icon above it when it has a role
+--               (ServiceNPC), name only when settings.npccompact is on (the glue decides); no
+--               relation (nil). Such a unit is never a player.
 --   "default" : everything else (addon off, compact off, other enemies, NPCs, the target,
 --               anything unknown): the plate as the game draws it.
 -- Only the exact boolean answers count, so an unknown or secret value gives "default" (or, for
@@ -957,6 +1475,9 @@ function Core.PlateMode(info, settings)
   end
   if Core.QuestHostile(info, settings) then
     return "quest", nil
+  end
+  if Core.NpcPlate(info, settings) then
+    return "npc", nil
   end
   local relation = Core.Relation(info, settings)
   if relation == "member" then
