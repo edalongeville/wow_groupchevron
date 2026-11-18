@@ -43,6 +43,7 @@ read_globals = {
   "GetDetailedItemLevelInfo",
   "GetFactionInfo",
   "GetGuildInfo",
+  "IsInGroup",
   "GetInventoryItemID",
   "GetInventoryItemLink",
   "GetItemInfo",

@@ -20,6 +20,8 @@ Core.DEFAULT_FRIEND_COLOR = { 63 / 255, 167 / 255, 255 / 255 }
 Core.DEFAULT_GUILD_COLOR = { 64 / 255, 255 / 255, 64 / 255 }
 -- DEFAULT_HOSTILE_COLOR is #FFFF00 (yellow): hostile units tied to one of the player's quests.
 Core.DEFAULT_HOSTILE_COLOR = { 255 / 255, 255 / 255, 0 / 255 }
+-- DEFAULT_PARTYQUEST_COLOR is #FFFFFF (white): hostile units tied to a party member's quest.
+Core.DEFAULT_PARTYQUEST_COLOR = { 1, 1, 1 }
 
 local function finite(v)
   return type(v) == "number" and v == v and v ~= math.huge and v ~= -math.huge
@@ -81,23 +83,29 @@ function Core.CopyDefaultHostileColor()
   return { Core.DEFAULT_HOSTILE_COLOR[1], Core.DEFAULT_HOSTILE_COLOR[2], Core.DEFAULT_HOSTILE_COLOR[3] }
 end
 
+-- CopyDefaultPartyQuestColor returns a new table holding the default party quest colour.
+function Core.CopyDefaultPartyQuestColor()
+  return { Core.DEFAULT_PARTYQUEST_COLOR[1], Core.DEFAULT_PARTYQUEST_COLOR[2], Core.DEFAULT_PARTYQUEST_COLOR[3] }
+end
+
 -- ValidColor is true for a table { r, g, b } of numbers in 0..1.
 function Core.ValidColor(c)
   return type(c) == "table" and isUnit(c[1]) and isUnit(c[2]) and isUnit(c[3])
 end
 
 -- Size factors of the chevron and of the name text: 1 (default) to 3, except the chevron sizes
--- (chevsize, and hostilechevsize for the single chevron of the hostiles), which go up to 5.
+-- (chevsize, and hostilechevsize / partyquestchevsize for the single chevron of the hostiles),
+-- which go up to 5.
 Core.MIN_FACTOR = 1
--- The outline thicknesses (memberoutlinesize, friendoutlinesize, guildoutlinesize, hostileoutlinesize)
--- start at 0: no outline. npciconalpha is the role icon's opacity: 0.1 (faint, never invisible) to 1
--- (opaque); default 0.8.
+-- The outline thicknesses (memberoutlinesize, friendoutlinesize, guildoutlinesize, hostileoutlinesize,
+-- partyquestoutlinesize) start at 0: no outline. npciconalpha is the role icon's opacity: 0.1 (faint,
+-- never invisible) to 1 (opaque); default 0.8.
 Core.MIN_FACTORS = { memberoutlinesize = 0, friendoutlinesize = 0, guildoutlinesize = 0, hostileoutlinesize = 0,
-  npciconalpha = 0.1 }
+  partyquestoutlinesize = 0, npciconalpha = 0.1 }
 Core.DEFAULT_MAX_FACTOR = 3
 Core.MAX_FACTORS = { chevsize = 5, hostilechevsize = 5, friendchevsize = 5, guildchevsize = 5,
   memberoutlinesize = 5, friendoutlinesize = 5, guildoutlinesize = 5, hostileoutlinesize = 5, npciconsize = 15,
-  npciconalpha = 1 }
+  partyquestchevsize = 5, partyquestoutlinesize = 5, npciconalpha = 1 }
 Core.DEFAULT_FACTOR = 1
 -- DEFAULT_FACTORS are the defaults of the kinds that do not start at DEFAULT_FACTOR (1, which
 -- also stays the "no scaling" value the plates compare against). The hostiles start where the
@@ -108,7 +116,7 @@ Core.DEFAULT_FACTORS = { chevsize = 3, textsize = 1.75, buffsize = 1.1, othersiz
   friendsize = 1.75, guildsize = 1.75, hostilechevsize = 3,
   friendchevsize = 3, guildchevsize = 3, memberoutlinesize = 2,
   friendoutlinesize = 2, guildoutlinesize = 2, hostileoutlinesize = 2, npciconsize = 5,
-  npciconalpha = 0.8 }
+  partyquestchevsize = 3, partyquestsize = 1.5, partyquestoutlinesize = 2, npciconalpha = 0.8 }
 
 -- DefaultFactor is the default of a factor kind: its DEFAULT_FACTORS entry, else DEFAULT_FACTOR.
 function Core.DefaultFactor(kind)
@@ -162,15 +170,17 @@ end
 -- puts its name above the health bar, in whole UI points (the parent's units, not scaled by the
 -- text size): "namegap" for group members, "othernamegap" for other friendly players (compact
 -- or not, the target included, like othersize), "hostilenamegap" for the hostiles tied to a
--- quest. 0 is the layout without a gap (NO_GAP); the default of every kind is DEFAULT_GAP, but
--- npcnamegap's is DEFAULT_NPC_GAP (0.24.0: the name sits in the faded health bar's place, and the
--- plate is placed well above the model).
+-- quest, "partyquestnamegap" for the hostiles tied to a party member's quest. 0 is the layout
+-- without a gap (NO_GAP); the default of every kind is DEFAULT_GAP, but npcnamegap's is
+-- DEFAULT_NPC_GAP (0.24.0: the name sits in the faded health bar's place, and the plate is placed
+-- well above the model).
 Core.MIN_GAP = -40
 Core.MAX_GAP = 40
 Core.NO_GAP = 0
 Core.DEFAULT_GAP = 5
 Core.DEFAULT_NPC_GAP = -20
-Core.GAP_KINDS = { namegap = true, othernamegap = true, hostilenamegap = true, npcnamegap = true }
+Core.GAP_KINDS = { namegap = true, othernamegap = true, hostilenamegap = true, npcnamegap = true,
+  partyquestnamegap = true }
 
 -- DefaultGap is the default of a gap kind.
 function Core.DefaultGap(kind)
@@ -291,6 +301,7 @@ Core.Locales = {
     friends = "Friends (on your friends list, outside your group)",
     guildmates = "Guildmates (in your guild, outside your group)",
     hostiles = "Quest hostiles (enemies tied to your quests)",
+    party_hostiles = "Party quest hostiles (enemies tied to your party members' quests)",
     outline_size = "Outline",
     compact = "Compact plates (name only)",
     name_colour = "Name colour",
@@ -324,6 +335,7 @@ Core.Locales = {
     friends = "Amis (sur votre liste d'amis, hors de votre groupe)",
     guildmates = "Membres de la guilde (hors de votre groupe)",
     hostiles = "Ennemis de quête (liés à vos quêtes)",
+    party_hostiles = "Ennemis de quête des membres du groupe",
     outline_size = "Contour",
     compact = "Plaques compactes (nom seul)",
     name_colour = "Couleur du nom",
@@ -357,6 +369,7 @@ Core.Locales = {
     friends = "Freunde (auf der Freundesliste, außerhalb der Gruppe)",
     guildmates = "Gildenmitglieder (außerhalb der Gruppe)",
     hostiles = "Quest-Gegner (mit aktiven Quests verknüpft)",
+    party_hostiles = "Quest-Gegner der Gruppenmitglieder",
     outline_size = "Kontur",
     compact = "Kompakte Plaketten (nur Name)",
     name_colour = "Namensfarbe",
@@ -390,6 +403,7 @@ Core.Locales = {
     friends = "Amigos (en tu lista de amigos, fuera de tu grupo)",
     guildmates = "Miembros de la hermandad (fuera de tu grupo)",
     hostiles = "Enemigos de misión (ligados a tus misiones)",
+    party_hostiles = "Enemigos de misión de los miembros del grupo",
     outline_size = "Contorno",
     compact = "Placas compactas (solo nombre)",
     name_colour = "Color del nombre",
@@ -423,6 +437,7 @@ Core.Locales = {
     friends = "Amici (nella tua lista amici, fuori dal gruppo)",
     guildmates = "Membri della gilda (fuori dal gruppo)",
     hostiles = "Nemici delle missioni (legati alle tue missioni)",
+    party_hostiles = "Nemici delle missioni dei membri del gruppo",
     outline_size = "Contorno",
     compact = "Targhette compatte (solo nome)",
     name_colour = "Colore nome",
@@ -456,6 +471,7 @@ Core.Locales = {
     friends = "Amigos (na sua lista de amigos, fora do grupo)",
     guildmates = "Membros da guilda (fora do grupo)",
     hostiles = "Inimigos de missão (ligados às suas missões)",
+    party_hostiles = "Inimigos de missão dos membros do grupo",
     outline_size = "Contorno",
     compact = "Placas compactas (só o nome)",
     name_colour = "Cor do nome",
@@ -489,6 +505,7 @@ Core.Locales = {
     friends = "Друзья (в списке друзей, вне группы)",
     guildmates = "Согильдийцы (вне группы)",
     hostiles = "Цели заданий (враги, связанные с вашими заданиями)",
+    party_hostiles = "Цели заданий участников группы",
     outline_size = "Контур",
     compact = "Компактный вид (только имя)",
     name_colour = "Цвет имени",
@@ -522,6 +539,7 @@ Core.Locales = {
     friends = "친구 (친구 목록, 파티 외)",
     guildmates = "길드원 (파티 외)",
     hostiles = "퀘스트 적 (진행 중인 퀘스트 관련)",
+    party_hostiles = "파티원 퀘스트 적",
     outline_size = "외곽선",
     compact = "간략한 이름표 (이름만)",
     name_colour = "이름 색상",
@@ -555,6 +573,7 @@ Core.Locales = {
     friends = "好友（好友名单中，队伍外）",
     guildmates = "公会成员（队伍外）",
     hostiles = "任务敌人（与你的任务相关）",
+    party_hostiles = "队友的任务敌人",
     outline_size = "描边",
     compact = "精简姓名板（仅名字）",
     name_colour = "名字颜色",
@@ -588,6 +607,7 @@ Core.Locales = {
     friends = "好友（好友名單中，隊伍外）",
     guildmates = "公會成員（隊伍外）",
     hostiles = "任務敵人（與你的任務相關）",
+    party_hostiles = "隊友的任務敵人",
     outline_size = "描邊",
     compact = "精簡名條（僅名字）",
     name_colour = "名字顏色",
@@ -653,12 +673,12 @@ function Core.InitDB(db)
   for _, key in ipairs({ "chevsize", "textsize", "othersize", "barsize", "buffsize", "otherbarsize",
     "hostilechevsize", "hostilesize", "friendchevsize", "guildchevsize", "memberoutlinesize",
     "friendoutlinesize", "guildoutlinesize", "hostileoutlinesize", "npciconsize", "npcsize", "friendsize",
-    "guildsize", "npciconalpha" }) do
+    "guildsize", "partyquestchevsize", "partyquestsize", "partyquestoutlinesize", "npciconalpha" }) do
     if not Core.ValidFactor(db[key], key) then
       db[key] = Core.DefaultFactor(key)
     end
   end
-  for _, key in ipairs({ "namegap", "othernamegap", "hostilenamegap", "npcnamegap" }) do
+  for _, key in ipairs({ "namegap", "othernamegap", "hostilenamegap", "npcnamegap", "partyquestnamegap" }) do
     if not Core.ValidGap(db[key]) then
       db[key] = Core.DefaultGap(key)
     end
@@ -692,6 +712,11 @@ function Core.InitDB(db)
   else
     db.hostilecolor = { db.hostilecolor[1], db.hostilecolor[2], db.hostilecolor[3] }
   end
+  if not Core.ValidColor(db.partyquestcolor) then
+    db.partyquestcolor = Core.CopyDefaultPartyQuestColor()
+  else
+    db.partyquestcolor = { db.partyquestcolor[1], db.partyquestcolor[2], db.partyquestcolor[3] }
+  end
   for _, key in ipairs({ "friendchevron", "bnetfriends", "guildchevron", "showlevel", "npcicons", "npccompact" }) do
     if type(db[key]) ~= "boolean" then
       db[key] = true
@@ -714,7 +739,8 @@ Core.PAGE_KEYS = {
     "classcolor", "showlevel", "chevsize", "textsize", "othersize", "barsize", "buffsize", "otherbarsize",
     "friendchevsize", "guildchevsize", "memberoutlinesize", "friendoutlinesize", "guildoutlinesize", "namegap",
     "othernamegap", "friendsize", "guildsize" },
-  quests = { "hostilecolor", "hostilechevsize", "hostilesize", "hostileoutlinesize", "hostilenamegap" },
+  quests = { "hostilecolor", "hostilechevsize", "hostilesize", "hostileoutlinesize", "hostilenamegap",
+    "partyquestcolor", "partyquestchevsize", "partyquestsize", "partyquestoutlinesize", "partyquestnamegap" },
   npcs = { "npcicons", "npccompact", "npcsize", "npciconsize", "npcnamegap", "npciconalpha" },
 }
 
@@ -1264,6 +1290,104 @@ function Core.ServiceLookup(api, unit, learned, guid)
   return role, "subtitle"
 end
 
+-- read returns t[key] under pcall, or nil when indexing fails or the value is secret.
+local function read(api, t, key)
+  if type(t) ~= "table" then
+    return nil
+  end
+  local ok, v = pcall(function() return t[key] end)
+  if not ok or isSecret(api, v) then
+    return nil
+  end
+  return v
+end
+
+-- ObjectiveOpen tells whether a QuestObjective line of a unit's tooltip data (see
+-- PartyQuestLookup) is an objective still to do: its completed field when it is a boolean, else
+-- a "n/m" count in its leftText with n < m. Anything else (no completed field, no count, a secret
+-- or unreadable value) counts as "not open".
+function Core.ObjectiveOpen(api, line)
+  local completed = read(api, line, "completed")
+  if type(completed) == "boolean" then
+    return not completed
+  end
+  local text = read(api, line, "leftText")
+  if type(text) ~= "string" then
+    return false
+  end
+  local done, total = text:match("(%d+)%s*/%s*(%d+)")
+  done, total = tonumber(done), tonumber(total)
+  return done ~= nil and total ~= nil and done < total
+end
+
+-- PartyQuestLookup tells whether unit is tied to an objective a party member still has to do,
+-- read from the unit's tooltip data (api.GetTooltipUnit(unit), i.e. C_TooltipInfo.GetUnit: the
+-- same lines the game shows on the mouseover tooltip). Its lines are walked in order with the
+-- line types of api.TooltipLineTypes (Enum.TooltipDataLineType): a QuestTitle line starts a
+-- quest with the player's own objectives, a QuestPlayer line (leftText: a name) starts the
+-- objectives of that player, and a QuestObjective line under a QuestPlayer line naming someone
+-- other than the player (api.UnitName("player")) counts when ObjectiveOpen says so. Only asked
+-- in a group: api.IsInGroup() exactly false skips it. It returns the answer and its source:
+--   "tooltip" : an open objective of a party member was found;
+--   "none"    : no such objective (also when an API raises an error or returns a secret value);
+--   "nogroup" : the player is not in a group (the tooltip is not read);
+--   "missing" : the tooltip data API or one of the line types does not exist on this client.
+-- Anything unknown counts as "not tied to a party member's quest".
+function Core.PartyQuestLookup(api, unit)
+  if type(api) ~= "table" or type(api.GetTooltipUnit) ~= "function" then
+    return false, "missing"
+  end
+  local types = api.TooltipLineTypes
+  local tTitle = read(api, types, "QuestTitle")
+  local tPlayer = read(api, types, "QuestPlayer")
+  local tObjective = read(api, types, "QuestObjective")
+  if tPlayer == nil or tObjective == nil then
+    return false, "missing"
+  end
+  if type(unit) ~= "string" or unit == "" or isSecret(api, unit) then
+    return false, "none"
+  end
+  if type(api.IsInGroup) == "function" and call(api, "IsInGroup") == false then
+    return false, "nogroup"
+  end
+  local data = call(api, "GetTooltipUnit", unit)
+  local lines = read(api, data, "lines")
+  if type(lines) ~= "table" then
+    return false, "none"
+  end
+  local selfName = call(api, "UnitName", "player")
+  if type(selfName) ~= "string" then
+    selfName = nil
+  end
+  -- owner: nil for the player's own objectives, a name for another player's, false when the
+  -- name could not be read (that player's objectives are skipped).
+  local owner = nil
+  for i = 1, 200 do
+    local line = read(api, lines, i)
+    if line == nil then
+      break
+    end
+    local kind = read(api, line, "type")
+    if kind ~= nil then
+      if kind == tTitle then
+        owner = nil
+      elseif kind == tPlayer then
+        local name = read(api, line, "leftText")
+        if type(name) ~= "string" or name == "" then
+          owner = false
+        elseif name == selfName then
+          owner = nil
+        else
+          owner = name
+        end
+      elseif kind == tObjective and type(owner) == "string" and Core.ObjectiveOpen(api, line) then
+        return true, "tooltip"
+      end
+    end
+  end
+  return false, "none"
+end
+
 -- readRGB returns the r, g, b (numbers in 0..1, none secret) of a class colour c: a ColorMixin
 -- (c:GetRGB()) or a table with fields r, g, b (RAID_CLASS_COLORS), or nil.
 local function readRGB(api, c)
@@ -1325,14 +1449,17 @@ end
 -- neutral units alike) and target (UnitIsUnit(unit, "target")) is true, false or nil (unknown:
 -- missing function, error or secret value). quest is true only for an attackable unit that
 -- QuestLookup says is tied to an active quest, and questSource is its source ("skipped" when the
--- unit is not known to be attackable: the quest API is then not asked). listed is true only when FriendLookup says
+-- unit is not known to be attackable: the quest API is then not asked). partyQuest is true only
+-- for an attackable unit not tied to the player's own quests that PartyQuestLookup says is tied to
+-- a party member's open objective, and partyQuestSource is its source ("skipped" when the unit is
+-- not known to be attackable or is tied to the player's own quests). listed is true only when FriendLookup says
 -- the unit's GUID is a friend (Battle.net friends only with settings.bnetfriends), and source is
 -- its source; guild and guildSource are GuildLookup's answer and source. Only with
 -- settings.classcolor: class is the class token and classColor { r, g, b } its colour (nil
 -- when unknown); without the setting the class is never asked.
 function Core.UnitInfo(api, unit, settings)
   local info = { listed = false, source = "missing", guild = false, guildSource = "missing", quest = false,
-    questSource = "skipped" }
+    questSource = "skipped", partyQuest = false, partyQuestSource = "skipped" }
   if type(api) ~= "table" or type(unit) ~= "string" or unit == "" or isSecret(api, unit) then
     return info
   end
@@ -1358,6 +1485,9 @@ function Core.UnitInfo(api, unit, settings)
   end
   if info.attackable == true then
     info.quest, info.questSource = Core.QuestLookup(api, unit)
+    if info.quest ~= true then
+      info.partyQuest, info.partyQuestSource = Core.PartyQuestLookup(api, unit)
+    end
   end
   if Core.IsGroupMember(api, unit) then
     info.member = true
@@ -1433,6 +1563,17 @@ function Core.NpcPlate(info, settings)
     or (Core.ValidFactor(size, "npcsize") and size ~= Core.DEFAULT_FACTOR)
 end
 
+-- PartyQuestHostile is true when the plate of the unit described by info (see UnitInfo) is a unit
+-- the player can attack that is not tied to the player's own quests (QuestHostile wins) but to an
+-- open objective of a party member, and the addon is on (settings.enabled). Only exact boolean
+-- answers count.
+function Core.PartyQuestHostile(info, settings)
+  if type(info) ~= "table" or type(settings) ~= "table" or settings.enabled ~= true then
+    return false
+  end
+  return info.attackable == true and info.self ~= true and info.quest ~= true and info.partyQuest == true
+end
+
 -- Relation returns how the player relates to the unit described by info (see UnitInfo), in
 -- priority order: "member" (group member), "friend" (a friendly player on the friends list,
 -- not a member, not the player; a Battle.net friend only with settings.bnetfriends), or nil.
@@ -1491,6 +1632,9 @@ end
 --   "quest"   : a hostile (attackable) unit tied to one of the player's active quests
 --               (QuestHostile): full plate, name in the hostile colour, single chevron; no
 --               relation (nil). Such a unit is never a member, friend or friendly player.
+--   "partyquest" : a hostile (attackable) unit tied to a party member's open objective and not
+--               to the player's own quests (PartyQuestHostile): full plate, name in the party
+--               quest colour, single chevron; no relation (nil).
 --   "npc"     : a friendly NPC the addon has something to do on (NpcPlate): the name in
 --               Blizzard's colour at npcsize, the role icon above it when it has a role
 --               (ServiceNPC), name only when settings.npccompact is on (the glue decides); no
@@ -1505,6 +1649,9 @@ function Core.PlateMode(info, settings)
   end
   if Core.QuestHostile(info, settings) then
     return "quest", nil
+  end
+  if Core.PartyQuestHostile(info, settings) then
+    return "partyquest", nil
   end
   if Core.NpcPlate(info, settings) then
     return "npc", nil
