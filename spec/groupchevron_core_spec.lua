@@ -286,12 +286,52 @@ describe("GroupChevron Core", function()
     end)
   end)
 
+  describe("options pages", function()
+    it("puts every setting on exactly one page, except the data the addon keeps", function()
+      local seen = {}
+      for page, keys in pairs(Core.PAGE_KEYS) do
+        for _, key in ipairs(keys) do
+          assert.is_nil(seen[key], key)
+          seen[key] = page
+        end
+      end
+      for key in pairs(Core.InitDB({})) do
+        if key ~= "npcroles" and key ~= "roleicons" then
+          assert.is_string(seen[key], key)
+        end
+      end
+    end)
+
+    it("resets one page only", function()
+      local db = Core.InitDB({ textsize = 3, othersize = 2, hostilesize = 2, npcsize = 2, font = "chat",
+        enabled = false, npcroles = { [9] = "flight" }, roleicons = { flight = "x" } })
+      assert.is_true(Core.ResetPage(db, "players"))
+      assert.are.equal(1.75, db.textsize)
+      assert.are.equal(1.5, db.othersize)
+      assert.are.equal(2, db.hostilesize)
+      assert.are.equal(2, db.npcsize)
+      assert.are.equal("chat", db.font)
+      assert.is_true(Core.ResetPage(db, "main"))
+      assert.are.equal("outline", db.font)
+      assert.is_true(db.enabled)
+      assert.is_true(Core.ResetPage(db, "quests"))
+      assert.are.equal(1, db.hostilesize)
+      assert.is_true(Core.ResetPage(db, "npcs"))
+      assert.are.equal(1, db.npcsize)
+      -- The learned roles and the icon choices stay.
+      assert.are.same({ [9] = "flight" }, db.npcroles)
+      assert.are.same({ flight = "x" }, db.roleicons)
+      assert.is_false(Core.ResetPage(db, "nope"))
+      assert.is_false(Core.ResetPage(nil, "main"))
+    end)
+  end)
+
   describe("InitDB", function()
     it("defaults and validates the size factors", function()
       local db = Core.InitDB(nil)
       assert.are.equal(3, db.chevsize)
       assert.are.equal(1.75, db.textsize)
-      assert.are.equal(1, db.othersize)
+      assert.are.equal(1.5, db.othersize)
       assert.are.equal(1.1, db.buffsize)
       db = Core.InitDB({ chevsize = 2.5, textsize = 3, othersize = 1.5 })
       assert.are.equal(2.5, db.chevsize)
@@ -306,7 +346,7 @@ describe("GroupChevron Core", function()
           otherbarsize = bad })
         assert.are.equal(3, db.chevsize)
         assert.are.equal(1.75, db.textsize)
-        assert.are.equal(1, db.othersize)
+        assert.are.equal(1.5, db.othersize)
         assert.are.equal(1, db.barsize)
         assert.are.equal(1.1, db.buffsize)
         assert.are.equal(1, db.otherbarsize)
@@ -352,7 +392,7 @@ describe("GroupChevron Core", function()
       local db = Core.InitDB(nil)
       assert.are.same({ 1, 1, 0 }, db.hostilecolor)
       assert.are.equal(Core.DefaultFactor("chevsize"), db.hostilechevsize) -- the friends' chevron size
-      assert.are.equal(Core.DefaultFactor("othersize"), db.hostilesize)
+      assert.are.equal(1, db.hostilesize) -- not the friendlies' 1.5
       assert.are.equal(Core.DefaultGap("othernamegap"), db.hostilenamegap)
       assert.are_not.equal(Core.DEFAULT_HOSTILE_COLOR, Core.CopyDefaultHostileColor())
       assert.are.same(Core.DEFAULT_HOSTILE_COLOR, Core.CopyDefaultHostileColor())

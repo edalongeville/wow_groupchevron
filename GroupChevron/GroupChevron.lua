@@ -2047,33 +2047,12 @@ local function ResetColor()
   return true
 end
 
--- ResetAll puts every setting back to its default (the panel's button).
-local function ResetAll()
-  if type(db) ~= "table" then
+-- ResetPage puts the settings of one options page back to their defaults (its Reset button;
+-- Core.PAGE_KEYS: "main", "players", "quests" or "npcs"), and nothing else.
+local function ResetPage(page)
+  if not Core.ResetPage(db, page) then
     return false
   end
-  db.enabled = true
-  db.compact = true
-  db.color = Core.CopyDefaultColor()
-  db.friendcolor = Core.CopyDefaultFriendColor()
-  db.friendchevron = true
-  db.bnetfriends = true
-  db.guildcolor = Core.CopyDefaultGuildColor()
-  db.guildchevron = true
-  db.hostilecolor = Core.CopyDefaultHostileColor()
-  db.classcolor = Core.DEFAULT_CLASSCOLOR
-  db.showlevel = true
-  db.npcicons = true
-  db.npccompact = true
-  for _, key in ipairs({ "chevsize", "textsize", "othersize", "barsize", "buffsize", "otherbarsize",
-    "hostilechevsize", "hostilesize", "friendchevsize", "guildchevsize", "memberoutlinesize",
-    "friendoutlinesize", "guildoutlinesize", "hostileoutlinesize", "npciconsize", "npcsize" }) do
-    db[key] = Core.DefaultFactor(key)
-  end
-  for _, key in ipairs({ "namegap", "othernamegap", "hostilenamegap", "npcnamegap" }) do
-    db[key] = Core.DefaultGap(key)
-  end
-  db.font = Core.DEFAULT_FONT
   Changed()
   return true
 end
@@ -2187,9 +2166,9 @@ local function BuildPanel()
   local pages = {
     root = NewPage("GroupChevron", 120),
     main = NewPage(L("page_main"), 140),
-    players = NewPage(L("page_players"), 980),
-    quests = NewPage(L("page_quests"), 300),
-    npcs = NewPage(L("page_npcs"), 300),
+    players = NewPage(L("page_players"), 1010),
+    quests = NewPage(L("page_quests"), 340),
+    npcs = NewPage(L("page_npcs"), 340),
   }
 
   local function Label(text, x, y, template)
@@ -2406,14 +2385,19 @@ local function BuildPanel()
     { "guildoutlinesize", Slider(L("outline_size"), -642, "guildoutlinesize", OUTLINE_GEOMETRY) },
   }
 
+  -- ResetButton adds, at y on the current page, a Reset button that resets that page only.
+  local function ResetButton(y, key)
+    local button = CreateFrame("Button", nil, content, "UIPanelButtonTemplate")
+    button:SetSize(160, 24)
+    button:SetPoint("TOPLEFT", content, "TOPLEFT", 16, y)
+    button:SetText(L("reset"))
+    button:SetScript("OnClick", function()
+      SafeCall("options reset", ResetPage, key)
+    end)
+    return button
+  end
   content = pages.main.content
-  local reset = CreateFrame("Button", nil, content, "UIPanelButtonTemplate")
-  reset:SetSize(160, 24)
-  reset:SetPoint("TOPLEFT", content, "TOPLEFT", 16, -96)
-  reset:SetText(L("reset"))
-  reset:SetScript("OnClick", function()
-    SafeCall("options reset", ResetAll)
-  end)
+  ResetButton(-96, "main")
 
   -- Friends (on your friends list, outside your group).
   content = pages.players.content
@@ -2639,6 +2623,15 @@ local function BuildPanel()
       error(err, 0)
     end
   end
+  -- The other pages' Reset buttons, below their sections (created last: the specs find buttons
+  -- by creation order).
+  content = pages.players.content
+  ResetButton(-966, "players")
+  content = pages.quests.content
+  ResetButton(-296, "quests")
+  content = pages.npcs.content
+  ResetButton(-294, "npcs")
+
   -- The GroupChevron category and its sub-categories. A client without sub-categories gets one
   -- category per page instead ("GroupChevron - <page>").
   local cat = Settings.RegisterCanvasLayoutCategory(pages.root.panel, "GroupChevron")

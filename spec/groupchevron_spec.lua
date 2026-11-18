@@ -157,7 +157,7 @@ end
 -- NEUTRAL_SETTINGS are the settings the specs run with unless they say otherwise (see load).
 local NEUTRAL_SETTINGS = {
   chevsize = 1, textsize = 1, buffsize = 1, namegap = 0, othernamegap = 0, font = "default", classcolor = false,
-  hostilechevsize = 1, friendchevsize = 1, guildchevsize = 1, hostilesize = 1, hostilenamegap = 0,
+  hostilechevsize = 1, friendchevsize = 1, guildchevsize = 1, hostilesize = 1, hostilenamegap = 0, othersize = 1,
   -- Friendly NPCs are left as Blizzard draws them unless a spec turns their options on.
   npccompact = false,
 }
@@ -391,7 +391,7 @@ describe("GroupChevron", function()
     assert.is_true(db.compact)
     assert.is_true(db.classcolor)
     assert.is_true(db.showlevel)
-    assert.are.equal(1, db.othersize)
+    assert.are.equal(1.5, db.othersize)
     assert.are.equal(1, db.otherbarsize)
     assert.are.equal(5, db.othernamegap)
     assert.are.equal("#3FA7FF", hex(db.friendcolor))
@@ -1216,7 +1216,7 @@ describe("GroupChevron", function()
       assert.are.equal(1, holder.scale)
 
       env.slash("othersize")
-      assert.is_true(printedContains(env, "othersize 1 (1 to 3, default 1)"))
+      assert.is_true(printedContains(env, "othersize 1 (1 to 3, default 1.5)"))
       env.slash("othersize 1.75")
       assert.are.equal(1.75, env.GroupChevronDB.othersize)
       assert.are.equal(1.75, holder.scale)
@@ -3791,6 +3791,16 @@ describe("GroupChevron", function()
       end
     end
 
+    -- resetButton returns the Reset button of the options page called name.
+    local function resetButton(rec, name)
+      local content = page(rec, name)
+      for _, c in ipairs(rec.created) do
+        if c.kind == "Button" and c.parent == content and c.f.text == "Reset to defaults" then
+          return c.f
+        end
+      end
+    end
+
     -- labelY returns the y of the first label of content whose text starts with prefix.
     local function labelY(content, prefix)
       for _, l in ipairs(content.labels) do
@@ -3983,8 +3993,12 @@ describe("GroupChevron", function()
             assert.is_true(prev.points[1][5] - prev.h > b.points[1][5])
           end
         end
+        -- Each page's own Reset button sits below its last section.
+        local last, reset = boxes[#boxes], resetButton(rec, name)
+        assert.is_true(last.points[1][5] - last.h > reset.points[1][5], name)
       end
       assert.are.equal(6, total)
+      assert.is_table(resetButton(rec, "Main"))
     end)
 
     it("uses SetBackdrop for the frame border when the client has it", function()
@@ -4158,7 +4172,7 @@ describe("GroupChevron", function()
       assert.are.equal("#00FF00", hex(env.GroupChevronDB.color))
     end)
 
-    it("resets everything with the button, but /gchev reset only the colour", function()
+    it("resets each page with its own button, and /gchev reset only the colour", function()
       local overrides, rec = widgetClient()
       local env = load({ overrides = overrides })
       env.slash("color #00ff00")
@@ -4184,13 +4198,23 @@ describe("GroupChevron", function()
       assert.is_false(env.GroupChevronDB.enabled)
 
       env.slash("color #00ff00")
-      local button = widget(rec, "Button", 2)
+      env.slash("font chat")
+      -- Friendly players: only that page's settings.
+      local button = resetButton(rec, "Friendly players")
       button.scripts.OnClick(button)
       local db = env.GroupChevronDB
+      assert.are.equal(2, db.hostilechevsize)
+      assert.are.equal("chat", db.font)
+      assert.is_false(db.enabled)
+      assert.is_true(db.compact)
+      button = resetButton(rec, "Quest mobs")
+      button.scripts.OnClick(button)
+      button = resetButton(rec, "Main")
+      button.scripts.OnClick(button)
       assert.are.equal("#FF4FD8", hex(db.color))
       assert.are.equal(3, db.chevsize)
       assert.are.equal(1.75, db.textsize)
-      assert.are.equal(1, db.othersize)
+      assert.are.equal(1.5, db.othersize)
       assert.are.equal(1, db.barsize)
       assert.are.equal(1.1, db.buffsize)
       assert.are.equal(1, db.otherbarsize)
@@ -4259,7 +4283,7 @@ describe("GroupChevron", function()
       -- Reset to defaults covers the friend settings too.
       env.slash("friendcolor #00ff00")
       env.slash("friendchevron off")
-      local button = widget(rec, "Button", 2)
+      local button = resetButton(rec, "Friendly players")
       button.scripts.OnClick(button)
       local db = env.GroupChevronDB
       assert.are.equal("#3FA7FF", hex(db.friendcolor))
@@ -4287,7 +4311,7 @@ describe("GroupChevron", function()
       assert.is_true(chevronBox.checked)
       env.slash("guildcolor #ff0000")
       env.slash("guildchevron off")
-      local button = widget(rec, "Button", 2)
+      local button = resetButton(rec, "Friendly players")
       button.scripts.OnClick(button)
       assert.are.equal("#40FF40", hex(env.GroupChevronDB.guildcolor))
       assert.is_true(env.GroupChevronDB.guildchevron)
@@ -4314,7 +4338,7 @@ describe("GroupChevron", function()
       assert.is_false(classBox.checked)
       assert.are.same(BLUE, plate.UnitFrame.name.color)
 
-      local button = widget(rec, "Button", 2)
+      local button = resetButton(rec, "Friendly players")
       button.scripts.OnClick(button)
       assert.is_true(env.GroupChevronDB.classcolor)
       assert.is_true(classBox.checked)
@@ -4375,7 +4399,7 @@ describe("GroupChevron", function()
       rec.frame.scripts.OnShow(rec.frame)
       assert.is_true(levelBox.checked)
       env.slash("level off")
-      local button = widget(rec, "Button", 2)
+      local button = resetButton(rec, "Friendly players")
       button.scripts.OnClick(button)
       assert.is_true(env.GroupChevronDB.showlevel)
       assert.is_true(levelBox.checked)
@@ -4413,7 +4437,7 @@ describe("GroupChevron", function()
       env.slash("font nonsense")
       assert.are.equal("large", env.GroupChevronDB.font)
 
-      local reset = widget(rec, "Button", 2)
+      local reset = resetButton(rec, "Main")
       reset.scripts.OnClick(reset)
       assert.are.equal("outline", env.GroupChevronDB.font)
       assert.are.equal(OUTLINE, label.fontObject)
@@ -4429,7 +4453,13 @@ describe("GroupChevron", function()
       local env = load({ overrides = overrides })
       rec.frame.scripts.OnShow(rec.frame)
       assert.are.equal(Core.FONTS[1].label, texts[#texts])
-      assert.is_nil(widget(rec, "Button", 6)) -- no fallback button (Button 5 is the hostile swatch)
+      -- No fallback font button (Buttons 1 to 5 are the swatches and Main's Reset; the other pages'
+      -- Reset buttons come after).
+      for _, c in ipairs(rec.created) do
+        if c.kind == "Button" then
+          assert.are_not.equal(Core.FONTS[1].label, c.f.text)
+        end
+      end
 
       init()
       assert.are.equal(#Core.FONTS, #added)
@@ -4446,7 +4476,7 @@ describe("GroupChevron", function()
       env.slash("font outline")
       rec.frame.scripts.OnShow(rec.frame)
       assert.are.equal(Core.FONTS[2].label, texts[#texts])
-      local reset = widget(rec, "Button", 2)
+      local reset = resetButton(rec, "Main")
       reset.scripts.OnClick(reset)
       rec.frame.scripts.OnShow(rec.frame)
       assert.are.equal(Core.FONTS[2].label, texts[#texts]) -- the default font is "outline"

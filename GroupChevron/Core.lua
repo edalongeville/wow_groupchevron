@@ -98,9 +98,10 @@ Core.MAX_FACTORS = { chevsize = 5, hostilechevsize = 5, friendchevsize = 5, guil
 Core.DEFAULT_FACTOR = 1
 -- DEFAULT_FACTORS are the defaults of the kinds that do not start at DEFAULT_FACTOR (1, which
 -- also stays the "no scaling" value the plates compare against). The hostiles start where the
--- friendlies do: the chevron at the size the friends' chevron has (chevsize), the text at 1.
-Core.DEFAULT_FACTORS = { chevsize = 3, textsize = 1.75, buffsize = 1.1, hostilechevsize = 3, friendchevsize = 3,
-  guildchevsize = 3, memberoutlinesize = 2,
+-- friendlies do: the chevron at the size the friends' chevron has (chevsize); their text stays at 1
+-- (the friendlies' othersize starts at 1.5 since 0.23.0).
+Core.DEFAULT_FACTORS = { chevsize = 3, textsize = 1.75, buffsize = 1.1, othersize = 1.5, hostilechevsize = 3,
+  friendchevsize = 3, guildchevsize = 3, memberoutlinesize = 2,
   friendoutlinesize = 2, guildoutlinesize = 2, hostileoutlinesize = 2, npciconsize = 5 }
 
 -- DefaultFactor is the default of a factor kind: its DEFAULT_FACTORS entry, else DEFAULT_FACTOR.
@@ -669,6 +670,34 @@ function Core.InitDB(db)
   db.npcroles = Core.CleanRoles(db.npcroles)
   db.roleicons = Core.CleanRoleIcons(db.roleicons)
   return db
+end
+
+-- PAGE_KEYS are the saved settings of each options page, which its Reset button puts back to
+-- their defaults (ResetPage). Every setting InitDB fills in is on exactly one page, except the
+-- data the addon keeps (npcroles, roleicons, npcplatesnoticed), which no button resets.
+Core.PAGE_KEYS = {
+  main = { "enabled", "font" },
+  players = { "compact", "color", "friendcolor", "friendchevron", "bnetfriends", "guildcolor", "guildchevron",
+    "classcolor", "showlevel", "chevsize", "textsize", "othersize", "barsize", "buffsize", "otherbarsize",
+    "friendchevsize", "guildchevsize", "memberoutlinesize", "friendoutlinesize", "guildoutlinesize", "namegap",
+    "othernamegap" },
+  quests = { "hostilecolor", "hostilechevsize", "hostilesize", "hostileoutlinesize", "hostilenamegap" },
+  npcs = { "npcicons", "npccompact", "npcsize", "npciconsize", "npcnamegap" },
+}
+
+-- ResetPage puts the settings of the options page page (a key of PAGE_KEYS) back to their
+-- defaults in db, and leaves every other setting as it is. It returns false (nothing changed)
+-- for an unknown page or a db that is not a table.
+function Core.ResetPage(db, page)
+  local keys = type(page) == "string" and Core.PAGE_KEYS[page] or nil
+  if type(db) ~= "table" or not keys then
+    return false
+  end
+  for _, key in ipairs(keys) do
+    db[key] = nil
+  end
+  Core.InitDB(db)
+  return true
 end
 
 -- isSecret is true when api.issecretvalue flags v (or fails on it).
