@@ -1579,7 +1579,7 @@ describe("Core service NPCs", function()
     return api
   end
 
-  local ON = { enabled = true, services = true, npcroles = {} }
+  local ON = { enabled = true, npcicons = true, npcroles = {} }
 
   it("lists the roles in priority order, each with an icon", function()
     local keys = {}
@@ -1699,7 +1699,7 @@ describe("Core service NPCs", function()
     local info = Core.UnitInfo(npcAPI("Gryphon Master"), "nameplate5", ON)
     assert.are.equal("flight", info.service)
     assert.are.equal("subtitle", info.serviceSource)
-    assert.is_nil(Core.UnitInfo(npcAPI("Gryphon Master"), "nameplate5", { services = false }).service)
+    assert.is_nil(Core.UnitInfo(npcAPI("Gryphon Master"), "nameplate5", { npcicons = false }).service)
     local players = npcAPI("Gryphon Master", "enUS", { UnitIsPlayer = function() return true end })
     assert.is_nil(Core.UnitInfo(players, "nameplate5", ON).service)
     local enemy = npcAPI("Gryphon Master", "enUS", { UnitCanAttack = function() return true end })
@@ -1710,10 +1710,10 @@ describe("Core service NPCs", function()
 
   it("gives a friendly NPC with a role the service mode, before any other", function()
     local info = Core.UnitInfo(npcAPI("Gryphon Master"), "nameplate5", ON)
-    assert.are.same({ "service" }, { Core.PlateMode(info, ON) })
+    assert.are.same({ "npc" }, { Core.PlateMode(info, ON) })
     assert.is_true(Core.ServiceNPC(info, ON))
-    assert.are.equal("default", Core.PlateMode(info, { enabled = false, services = true }))
-    assert.are.equal("default", Core.PlateMode(info, { enabled = true, services = false }))
+    assert.are.equal("default", Core.PlateMode(info, { enabled = false, npcicons = true }))
+    assert.are.equal("default", Core.PlateMode(info, { enabled = true, npcicons = false }))
     assert.is_false(Core.ServiceNPC({ player = false, friend = true, attackable = false, service = "nope" }, ON))
     assert.is_false(Core.ServiceNPC({ player = false, friend = true, service = "flight" }, ON))
     -- A friendly NPC without a role stays Blizzard's.
@@ -1723,16 +1723,20 @@ describe("Core service NPCs", function()
 
   it("defaults the service settings and keeps the saved ones", function()
     local db = Core.InitDB({})
-    assert.is_true(db.services)
-    assert.is_true(db.servicecompact)
-    assert.are.equal(3, db.serviceiconsize)
+    assert.is_true(db.npcicons)
+    assert.is_true(db.npccompact)
+    assert.are.equal(5, db.npciconsize)
+    assert.are.equal(1, db.npcsize)
     assert.are.same({}, db.npcroles)
-    db = Core.InitDB({ services = false, servicecompact = false, serviceiconsize = 5, npcroles = { [9] = "flight" } })
-    assert.is_false(db.services)
-    assert.is_false(db.servicecompact)
-    assert.are.equal(5, db.serviceiconsize)
+    db = Core.InitDB({ npcicons = false, npccompact = false, npciconsize = 12, npcsize = 2,
+      npcroles = { [9] = "flight" } })
+    assert.is_false(db.npcicons)
+    assert.is_false(db.npccompact)
+    assert.are.equal(12, db.npciconsize)
+    assert.are.equal(2, db.npcsize)
     assert.are.same({ [9] = "flight" }, db.npcroles)
-    assert.are.equal(3, Core.InitDB({ serviceiconsize = 6 }).serviceiconsize)
+    assert.are.equal(5, Core.InitDB({ npciconsize = 16 }).npciconsize)
+    assert.are.equal(1, Core.InitDB({ npcsize = 4 }).npcsize)
   end)
 end)
 

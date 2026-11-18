@@ -49,6 +49,7 @@ local function newRegion()
     return not textureMissing
   end
   function r:SetVertexColor(cr, cg, cb, ca) self.vertex = { cr, cg, cb, ca } end
+  function r:SetTexCoord(...) self.texcoord = { ... } end
   return r
 end
 
@@ -156,6 +157,8 @@ end
 local NEUTRAL_SETTINGS = {
   chevsize = 1, textsize = 1, buffsize = 1, namegap = 0, othernamegap = 0, font = "default", classcolor = false,
   hostilechevsize = 1, friendchevsize = 1, guildchevsize = 1, hostilesize = 1, hostilenamegap = 0,
+  -- Friendly NPCs are left as Blizzard draws them unless a spec turns their options on.
+  npccompact = false,
 }
 
 local function load(opts)
@@ -3242,6 +3245,11 @@ describe("GroupChevron", function()
         },
         Enum = { PlayerInteractionType = { Merchant = 5, TaxiNode = 6 } },
       }
+      -- The friendly NPC options start from their defaults (compact on, icon size 5).
+      saved = saved or {}
+      if saved.npccompact == nil then
+        saved.npccompact = true
+      end
       return { overrides = overrides, saved = saved }
     end
 
@@ -3269,14 +3277,16 @@ describe("GroupChevron", function()
       local uf = plate.UnitFrame
       local frame, texture = icon(env, plate)
       assert.is_true(frame.shown)
-      assert.are.equal("Interface\\Minimap\\Tracking\\FlightMaster", texture)
-      assert.are.equal(18, frame.w) -- 6 x the default serviceiconsize 3
+      assert.are.equal("Interface\\Icons\\Ability_Mount_Gryphon_01", texture)
+      assert.are.equal(30, frame.w) -- 6 x the default npciconsize 5
+      -- The icon's bevelled border is cropped.
+      assert.is_not_nil(frame.tex.texcoord)
       -- Above our own name, which keeps Blizzard's colour.
       local label = env.label(plate)
       assert.are.equal(label, frame.points[1][2])
       assert.are.equal("#0080FF", hex(label.color))
       assert.are.equal("#0080FF", hex(uf.name.color))
-      -- Name only (servicecompact): the health bar and cast bar are faded, the icon is kept.
+      -- Name only (npccompact): the health bar and cast bar are faded, the icon is kept.
       assert.are.equal(0, uf.HealthBarsContainer.alpha)
       assert.are.equal(0, uf.castBar.alpha)
       assert.is_nil(frame.alpha)
@@ -3284,12 +3294,12 @@ describe("GroupChevron", function()
     end)
 
     it("reads a French client's subtitle as the game spells it", function()
-      local env = load(npcClient({ subtitle = "Maître des gryphons", locale = "frFR" }, { servicecompact = false }))
+      local env = load(npcClient({ subtitle = "Maître des gryphons", locale = "frFR" }, { npccompact = false }))
       local plate = newTreePlate("nameplate5")
       showNPC(env, plate)
       local frame, texture = icon(env, plate)
       assert.is_true(frame.shown)
-      assert.are.equal("Interface\\Minimap\\Tracking\\FlightMaster", texture)
+      assert.are.equal("Interface\\Icons\\Ability_Mount_Gryphon_01", texture)
     end)
 
     it("shows the target's full plate, with the icon, and never scales an NPC's health bar", function()
@@ -3308,33 +3318,56 @@ describe("GroupChevron", function()
       assert.are.equal(1, uf.HealthBarsContainer:GetScale())
     end)
 
-    it("keeps Blizzard's full plate with servicecompact off, and sizes the icon", function()
-      local env = load(npcClient({ subtitle = "Innkeeper" }, { servicecompact = false, serviceiconsize = 2 }))
+    it("keeps Blizzard's full plate with npccompact off, and sizes the icon", function()
+      local env = load(npcClient({ subtitle = "Innkeeper" }, { npccompact = false, npciconsize = 2 }))
       local plate = newTreePlate("nameplate5")
       showNPC(env, plate)
       local frame, texture = icon(env, plate)
-      assert.are.equal("Interface\\Minimap\\Tracking\\Innkeeper", texture)
+      assert.are.equal("Interface\\Icons\\INV_Misc_Rune_01", texture)
       assert.are.equal(12, frame.w)
       assert.is_nil(plate.UnitFrame.HealthBarsContainer.alpha)
-      env.slash("serviceiconsize 4")
+      env.slash("npciconsize 4")
       assert.are.equal(24, frame.w)
     end)
 
-    it("leaves friendly NPCs without a role, and every NPC with services off, alone", function()
+    it("shows every friendly NPC's name only, role or not, with the icons off too", function()
+      -- No role: name only, no icon.
       local env = load(npcClient({ subtitle = "Level 12" }))
       local plate = newTreePlate("nameplate5")
       showNPC(env, plate)
-      assert.is_nil(icon(env, plate))
-      assert.is_nil(plate.UnitFrame.HealthBarsContainer.alpha)
+      local frame = icon(env, plate)
+      assert.is_true(frame == nil or frame.shown == false)
+      assert.are.equal(0, plate.UnitFrame.HealthBarsContainer.alpha)
 
-      env = load(npcClient({ subtitle = "Gryphon Master", repair = true }, { services = false }))
+      -- Icons off, compact on (seen in game: the health bar stayed): name only, no icon.
+      env = load(npcClient({ subtitle = "Gryphon Master", repair = true }, { npcicons = false }))
       plate = newTreePlate("nameplate5")
       showNPC(env, plate)
-      assert.is_nil(icon(env, plate))
-      assert.are.equal(1, plate.UnitFrame.name:GetAlpha())
-      -- Nothing is learned either while the feature is off.
+      frame = icon(env, plate)
+      assert.is_true(frame == nil or frame.shown == false)
+      assert.are.equal(0, plate.UnitFrame.HealthBarsContainer.alpha)
+      assert.is_not_nil(env.label(plate))
+      -- Nothing is learned while the icons are off.
       env.fire("MERCHANT_SHOW")
       assert.are.same({}, env.GroupChevronDB.npcroles)
+    end)
+
+    it("leaves friendly NPCs alone with every option off, and sizes their names", function()
+      local env = load(npcClient({ subtitle = "Gryphon Master" }, { npcicons = false, npccompact = false }))
+      local plate = newTreePlate("nameplate5")
+      showNPC(env, plate)
+      assert.is_nil(icon(env, plate))
+      assert.is_nil(env.label(plate))
+      assert.is_nil(plate.UnitFrame.HealthBarsContainer.alpha)
+      assert.are.equal(1, plate.UnitFrame.name:GetAlpha())
+      -- A text size other than 1 is enough: our name at that size, the rest of the plate Blizzard's.
+      env.slash("npcsize 2")
+      local _, holder = env.label(plate)
+      assert.are.equal(2, holder.scale)
+      assert.is_nil(plate.UnitFrame.HealthBarsContainer.alpha)
+      env.slash("npcsize 1")
+      assert.is_false(holder.shown)
+      assert.are.equal(1, plate.UnitFrame.name:GetAlpha())
     end)
 
     it("learns the role from the windows an NPC opens, and shows it at once", function()
@@ -3348,13 +3381,13 @@ describe("GroupChevron", function()
       env.runTimers()
       local frame, texture = icon(env, plate)
       assert.is_true(frame.shown)
-      assert.are.equal("Interface\\Minimap\\Tracking\\Food", texture)
+      assert.are.equal("Interface\\Icons\\INV_Misc_Coin_01", texture)
       -- The same merchant can repair: the better role wins.
       npc.repair = true
       env.fire("PLAYER_INTERACTION_MANAGER_FRAME_SHOW", 5)
       env.runTimers()
       assert.are.equal("repair", env.GroupChevronDB.npcroles[352])
-      assert.are.equal("Interface\\Minimap\\Tracking\\Repair", select(2, icon(env, plate)))
+      assert.are.equal("Interface\\Icons\\Trade_BlackSmithing", select(2, icon(env, plate)))
       -- The interaction manager's taxi window: a flight master.
       env.fire("PLAYER_INTERACTION_MANAGER_FRAME_SHOW", 6)
       assert.are.equal("flight", env.GroupChevronDB.npcroles[352])
@@ -3398,9 +3431,9 @@ describe("GroupChevron", function()
       assert.is_false(icon(env, plate).shown)
       env.slash("on")
       assert.is_true(icon(env, plate).shown)
-      env.slash("services off")
+      env.slash("npcicons off")
       assert.is_false(icon(env, plate).shown)
-      assert.is_false(env.GroupChevronDB.services)
+      assert.is_false(env.GroupChevronDB.npcicons)
     end)
 
     it("turns the friendly NPC nameplates on or off only when asked, never in combat", function()
@@ -3445,7 +3478,7 @@ describe("GroupChevron", function()
       showNPC(env, plate)
       env.slash("")
       assert.is_true(printedContains(env,
-        "service NPCs: on, compact on, serviceiconsize 3, friendly NPC nameplates on"))
+        "friendly NPCs: icons on, compact on, npcsize 1, npciconsize 5, friendly NPC nameplates on"))
       assert.is_true(printedContains(env, "1 plate(s) marked"))
       env.world.target = "nameplate5"
       env.world.plates.target = plate
@@ -3621,7 +3654,7 @@ describe("GroupChevron", function()
       end
     end)
 
-    it("orders the sections Members, Friends, Guildmates, Quest hostiles, Friendlies, Service NPCs, Reset", function()
+    it("orders the sections Members, Friends, Guildmates, Quest hostiles, Friendlies, Friendly NPCs, Reset", function()
       local overrides, rec = widgetClient()
       load({ overrides = overrides })
       local content
@@ -3647,12 +3680,23 @@ describe("GroupChevron", function()
       assert.is_true(friends > guild)
       assert.is_true(guild > hostiles)
       assert.is_true(hostiles > friendlies)
-      local services = labelY("Service NPCs")
+      local services = labelY("Friendly NPCs")
       assert.is_number(services)
       assert.is_true(friendlies > services)
       -- Reset sits below the last section.
       local reset = widget(rec, "Button", 2)
       assert.is_true(services > reset.points[1][5])
+      -- In the friendly NPC section, the nameplates setting comes first, alone on its row.
+      local plates = labelY("Friendly NPC nameplates")
+      local icons = labelY("Show role icons")
+      assert.is_true(services > plates and plates > icons)
+      local onRow = 0
+      for _, l in ipairs(content.labels) do
+        if l.points[1][5] == plates then
+          onRow = onRow + 1
+        end
+      end
+      assert.are.equal(1, onRow)
     end)
 
     it("draws one bordered frame per option group, without overlap, above the Reset button", function()
@@ -3818,13 +3862,17 @@ describe("GroupChevron", function()
       assert.are.equal(7, env.GroupChevronDB.hostilenamegap)
       hostileGap.scripts.OnValueChanged(hostileGap, 41)
       assert.are.equal(7, env.GroupChevronDB.hostilenamegap)
-      -- The last one is the service NPCs' icon size (1..5).
-      local iconSize = widget(rec, "Slider", 18)
-      iconSize.scripts.OnValueChanged(iconSize, 4)
-      assert.are.equal(4, env.GroupChevronDB.serviceiconsize)
-      iconSize.scripts.OnValueChanged(iconSize, 5.5)
-      assert.are.equal(4, env.GroupChevronDB.serviceiconsize)
-      assert.is_nil(widget(rec, "Slider", 19))
+      -- The last ones are the friendly NPCs' text size (1..3) and icon size (1..15).
+      local npcText, iconSize = widget(rec, "Slider", 18), widget(rec, "Slider", 19)
+      npcText.scripts.OnValueChanged(npcText, 2)
+      assert.are.equal(2, env.GroupChevronDB.npcsize)
+      npcText.scripts.OnValueChanged(npcText, 3.5)
+      assert.are.equal(2, env.GroupChevronDB.npcsize)
+      iconSize.scripts.OnValueChanged(iconSize, 12)
+      assert.are.equal(12, env.GroupChevronDB.npciconsize)
+      iconSize.scripts.OnValueChanged(iconSize, 15.5)
+      assert.are.equal(12, env.GroupChevronDB.npciconsize)
+      assert.is_nil(widget(rec, "Slider", 20))
       assert.are.equal(2.25, env.GroupChevronDB.textsize)
 
       -- The panel shows the saved gaps when it opens.

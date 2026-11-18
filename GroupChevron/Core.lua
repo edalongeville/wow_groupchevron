@@ -94,14 +94,14 @@ Core.MIN_FACTOR = 1
 Core.MIN_FACTORS = { memberoutlinesize = 0, friendoutlinesize = 0, guildoutlinesize = 0, hostileoutlinesize = 0 }
 Core.DEFAULT_MAX_FACTOR = 3
 Core.MAX_FACTORS = { chevsize = 5, hostilechevsize = 5, friendchevsize = 5, guildchevsize = 5,
-  memberoutlinesize = 5, friendoutlinesize = 5, guildoutlinesize = 5, hostileoutlinesize = 5, serviceiconsize = 5 }
+  memberoutlinesize = 5, friendoutlinesize = 5, guildoutlinesize = 5, hostileoutlinesize = 5, npciconsize = 15 }
 Core.DEFAULT_FACTOR = 1
 -- DEFAULT_FACTORS are the defaults of the kinds that do not start at DEFAULT_FACTOR (1, which
 -- also stays the "no scaling" value the plates compare against). The hostiles start where the
 -- friendlies do: the chevron at the size the friends' chevron has (chevsize), the text at 1.
 Core.DEFAULT_FACTORS = { chevsize = 3, textsize = 1.75, buffsize = 1.1, hostilechevsize = 3, friendchevsize = 3,
   guildchevsize = 3, memberoutlinesize = 2,
-  friendoutlinesize = 2, guildoutlinesize = 2, hostileoutlinesize = 2, serviceiconsize = 3 }
+  friendoutlinesize = 2, guildoutlinesize = 2, hostileoutlinesize = 2, npciconsize = 5 }
 
 -- DefaultFactor is the default of a factor kind: its DEFAULT_FACTORS entry, else DEFAULT_FACTOR.
 function Core.DefaultFactor(kind)
@@ -292,7 +292,7 @@ Core.Locales = {
     bnet_friends = "Include Battle.net friends",
     class_colour = "Class colour",
     show_level = "Show level",
-    services = "Service NPCs (flight masters, vendors, repairers...)",
+    services = "Friendly NPCs",
     show_icons = "Show role icons",
     icon_size = "Icon size",
     npc_plates = "Friendly NPC nameplates",
@@ -318,7 +318,7 @@ Core.Locales = {
     bnet_friends = "Inclure les amis Battle.net",
     class_colour = "Couleur de classe",
     show_level = "Afficher le niveau",
-    services = "PNJ de service (maîtres de vol, marchands, réparateurs...)",
+    services = "PNJ amicaux",
     show_icons = "Afficher les icônes de rôle",
     icon_size = "Taille des icônes",
     npc_plates = "Plaques des PNJ amicaux",
@@ -344,7 +344,7 @@ Core.Locales = {
     bnet_friends = "Battle.net-Freunde einbeziehen",
     class_colour = "Klassenfarbe",
     show_level = "Stufe anzeigen",
-    services = "Dienstleister-NSCs (Flugmeister, Händler, Reparatur...)",
+    services = "Freundliche NSCs",
     show_icons = "Rollensymbole anzeigen",
     icon_size = "Symbolgröße",
     npc_plates = "Plaketten freundlicher NSCs",
@@ -370,7 +370,7 @@ Core.Locales = {
     bnet_friends = "Incluir amigos de Battle.net",
     class_colour = "Color de clase",
     show_level = "Mostrar nivel",
-    services = "PNJ de servicio (maestros de vuelo, vendedores, reparadores...)",
+    services = "PNJ amistosos",
     show_icons = "Mostrar iconos de función",
     icon_size = "Tamaño del icono",
     npc_plates = "Placas de PNJ amistosos",
@@ -396,7 +396,7 @@ Core.Locales = {
     bnet_friends = "Includi amici Battle.net",
     class_colour = "Colore classe",
     show_level = "Mostra livello",
-    services = "PNG di servizio (maestri di volo, mercanti, riparatori...)",
+    services = "PNG amichevoli",
     show_icons = "Mostra icone del ruolo",
     icon_size = "Dimensione icona",
     npc_plates = "Targhette dei PNG amichevoli",
@@ -422,7 +422,7 @@ Core.Locales = {
     bnet_friends = "Incluir amigos do Battle.net",
     class_colour = "Cor da classe",
     show_level = "Mostrar nível",
-    services = "PNJs de serviço (mestres de voo, vendedores, reparadores...)",
+    services = "PNJs amistosos",
     show_icons = "Mostrar ícones de função",
     icon_size = "Tamanho do ícone",
     npc_plates = "Placas de PNJs amistosos",
@@ -448,7 +448,7 @@ Core.Locales = {
     bnet_friends = "Учитывать друзей Battle.net",
     class_colour = "Цвет класса",
     show_level = "Показать уровень",
-    services = "Служебные НИП (распорядители полётов, торговцы, ремонт...)",
+    services = "Дружественные НИП",
     show_icons = "Показать значки ролей",
     icon_size = "Размер значка",
     npc_plates = "Индикаторы дружественных НИП",
@@ -474,7 +474,7 @@ Core.Locales = {
     bnet_friends = "Battle.net 친구 포함",
     class_colour = "직업 색상",
     show_level = "레벨 표시",
-    services = "기능 NPC (비행 조련사, 상인, 수리...)",
+    services = "우호적 NPC",
     show_icons = "역할 아이콘 표시",
     icon_size = "아이콘 크기",
     npc_plates = "우호적 NPC 이름표",
@@ -500,7 +500,7 @@ Core.Locales = {
     bnet_friends = "包括战网好友",
     class_colour = "职业颜色",
     show_level = "显示等级",
-    services = "功能NPC（飞行管理员、商人、修理…）",
+    services = "友方NPC",
     show_icons = "显示职能图标",
     icon_size = "图标大小",
     npc_plates = "友方NPC姓名板",
@@ -526,7 +526,7 @@ Core.Locales = {
     bnet_friends = "包含Battle.net好友",
     class_colour = "職業顏色",
     show_level = "顯示等級",
-    services = "功能NPC（飛行管理員、商人、修理…）",
+    services = "友方NPC",
     show_icons = "顯示職能圖示",
     icon_size = "圖示大小",
     npc_plates = "友方NPC名條",
@@ -569,7 +569,7 @@ function Core.InitDB(db)
   end
   for _, key in ipairs({ "chevsize", "textsize", "othersize", "barsize", "buffsize", "otherbarsize",
     "hostilechevsize", "hostilesize", "friendchevsize", "guildchevsize", "memberoutlinesize",
-    "friendoutlinesize", "guildoutlinesize", "hostileoutlinesize", "serviceiconsize" }) do
+    "friendoutlinesize", "guildoutlinesize", "hostileoutlinesize", "npciconsize", "npcsize" }) do
     if not Core.ValidFactor(db[key], key) then
       db[key] = Core.DefaultFactor(key)
     end
@@ -608,7 +608,7 @@ function Core.InitDB(db)
   else
     db.hostilecolor = { db.hostilecolor[1], db.hostilecolor[2], db.hostilecolor[3] }
   end
-  for _, key in ipairs({ "friendchevron", "bnetfriends", "guildchevron", "showlevel", "services", "servicecompact" }) do
+  for _, key in ipairs({ "friendchevron", "bnetfriends", "guildchevron", "showlevel", "npcicons", "npccompact" }) do
     if type(db[key]) ~= "boolean" then
       db[key] = true
     end
@@ -799,18 +799,25 @@ end
 --
 -- ROLES lists the roles in priority order (an NPC with two roles shows the first one: an
 -- innkeeper who also sells food shows the innkeeper icon, a vendor who repairs the repair one),
--- with the client texture of each icon (the minimap tracking icons; unverified on the Forever
--- client: a texture that does not load shows no icon).
+-- with the client texture of each icon: 64 x 64 spell and item icons (Interface\Icons), whose
+-- bevelled border the glue crops (ICON_CROP). Up to 0.23.0's first build these were the minimap
+-- tracking icons, too small once enlarged. The names are the retail client's (the Forever client
+-- is built on it) and are unverified on the Forever client: a texture that does not load shows no
+-- icon.
 Core.ROLES = {
-  { key = "flight", icon = "Interface\\Minimap\\Tracking\\FlightMaster" },
-  { key = "innkeeper", icon = "Interface\\Minimap\\Tracking\\Innkeeper" },
-  { key = "banker", icon = "Interface\\Minimap\\Tracking\\Banker" },
-  { key = "auctioneer", icon = "Interface\\Minimap\\Tracking\\Auctioneer" },
-  { key = "stable", icon = "Interface\\Minimap\\Tracking\\StableMaster" },
-  { key = "trainer", icon = "Interface\\Minimap\\Tracking\\Class" },
-  { key = "repair", icon = "Interface\\Minimap\\Tracking\\Repair" },
-  { key = "vendor", icon = "Interface\\Minimap\\Tracking\\Food" },
+  { key = "flight", icon = "Interface\\Icons\\Ability_Mount_Gryphon_01" },
+  { key = "innkeeper", icon = "Interface\\Icons\\INV_Misc_Rune_01" },
+  { key = "banker", icon = "Interface\\Icons\\INV_Misc_Bag_10" },
+  { key = "auctioneer", icon = "Interface\\Icons\\INV_Scroll_03" },
+  { key = "stable", icon = "Interface\\Icons\\Ability_Hunter_BeastTaming" },
+  { key = "trainer", icon = "Interface\\Icons\\INV_Misc_Book_09" },
+  { key = "repair", icon = "Interface\\Icons\\Trade_BlackSmithing" },
+  { key = "vendor", icon = "Interface\\Icons\\INV_Misc_Coin_01" },
 }
+
+-- ICON_CROP is the part of an Interface\Icons texture kept (SetTexCoord left, right, top,
+-- bottom): its bevelled border is cut off.
+Core.ICON_CROP = { 0.07, 0.93, 0.07, 0.93 }
 
 local rolePriority = {}
 for i, r in ipairs(Core.ROLES) do
@@ -1112,7 +1119,7 @@ function Core.UnitInfo(api, unit, settings)
   local guid = call(api, "UnitGUID", unit)
   info.listed, info.source = Core.FriendLookup(api, guid, bnet)
   info.guild, info.guildSource = Core.GuildLookup(api, unit, guid)
-  if type(settings) == "table" and settings.services == true and info.player == false and info.friend == true
+  if type(settings) == "table" and settings.npcicons == true and info.player == false and info.friend == true
     and info.attackable == false then
     info.service, info.serviceSource = Core.ServiceLookup(api, unit, settings.npcroles, guid)
   end
@@ -1142,14 +1149,32 @@ function Core.QuestHostile(info, settings)
   return info.attackable == true and info.self ~= true and info.quest == true
 end
 
+-- FriendlyNPC is true when info (see UnitInfo) is known to be a friendly NPC: not a player,
+-- friendly, not attackable (exact booleans only).
+function Core.FriendlyNPC(info)
+  return type(info) == "table" and info.player == false and info.friend == true and info.attackable == false
+end
+
 -- ServiceNPC is true when the plate of the unit described by info (see UnitInfo) is a friendly
 -- NPC (not a player, friendly, not attackable) with a known role (info.service, see
--- ServiceLookup), the addon is on and settings.services is on. Only exact boolean answers count.
+-- ServiceLookup), the addon is on and settings.npcicons is on. Only exact boolean answers count.
 function Core.ServiceNPC(info, settings)
-  if type(info) ~= "table" or type(settings) ~= "table" or settings.enabled ~= true or settings.services ~= true then
+  if type(info) ~= "table" or type(settings) ~= "table" or settings.enabled ~= true or settings.npcicons ~= true then
     return false
   end
-  return info.player == false and info.friend == true and info.attackable == false and Core.ValidRole(info.service)
+  return Core.FriendlyNPC(info) and Core.ValidRole(info.service)
+end
+
+-- NpcPlate is true when the addon has something to do on the plate of the friendly NPC described
+-- by info (see FriendlyNPC): a role icon (ServiceNPC), compact plates (settings.npccompact) or a
+-- name size other than 1 (settings.npcsize). Otherwise the plate stays Blizzard's.
+function Core.NpcPlate(info, settings)
+  if type(settings) ~= "table" or settings.enabled ~= true or not Core.FriendlyNPC(info) then
+    return false
+  end
+  local size = settings.npcsize
+  return Core.ServiceNPC(info, settings) or settings.npccompact == true
+    or (Core.ValidFactor(size, "npcsize") and size ~= Core.DEFAULT_FACTOR)
 end
 
 -- Relation returns how the player relates to the unit described by info (see UnitInfo), in
@@ -1210,9 +1235,10 @@ end
 --   "quest"   : a hostile (attackable) unit tied to one of the player's active quests
 --               (QuestHostile): full plate, name in the hostile colour, single chevron; no
 --               relation (nil). Such a unit is never a member, friend or friendly player.
---   "service" : a friendly NPC with a known role (ServiceNPC): the role icon above its name, the
---               name in Blizzard's colour; name only when settings.servicecompact is on (the
---               glue decides); no relation (nil). Such a unit is never a player.
+--   "npc"     : a friendly NPC the addon has something to do on (NpcPlate): the name in
+--               Blizzard's colour at npcsize, the role icon above it when it has a role
+--               (ServiceNPC), name only when settings.npccompact is on (the glue decides); no
+--               relation (nil). Such a unit is never a player.
 --   "default" : everything else (addon off, compact off, other enemies, NPCs, the target,
 --               anything unknown): the plate as the game draws it.
 -- Only the exact boolean answers count, so an unknown or secret value gives "default" (or, for
@@ -1224,8 +1250,8 @@ function Core.PlateMode(info, settings)
   if Core.QuestHostile(info, settings) then
     return "quest", nil
   end
-  if Core.ServiceNPC(info, settings) then
-    return "service", nil
+  if Core.NpcPlate(info, settings) then
+    return "npc", nil
   end
   local relation = Core.Relation(info, settings)
   if relation == "member" then

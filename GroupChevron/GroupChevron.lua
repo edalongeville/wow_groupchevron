@@ -16,12 +16,13 @@
 -- A hostile (attackable) unit tied to one of the player's active quests (C_QuestLog.UnitIsRelatedToActiveQuest:
 -- kill, item drop, ...) gets its name in the hostile colour (default #FFFF00) and a single "V"
 -- chevron above it, in that colour; the rest of its plate is left as Blizzard draws it.
--- With services on (default), a friendly NPC with a role (flight master, innkeeper, banker,
--- auctioneer, stable master, trainer, repairer, vendor) gets the role's icon above its name, and
--- with servicecompact on (default) its plate shows the name only. The role comes from the windows
--- the NPC opened for you (learned by creature ID, kept in GroupChevronDB.npcroles) and, on enUS and
--- frFR clients, from its subtitle ("<Gryphon Master>"). Friendly NPC plates are a game setting
--- (/gchev npcplates on|off sets it; the addon never changes it by itself).
+-- Friendly NPCs: with npcicons on (default), one with a role (flight master, innkeeper, banker,
+-- auctioneer, stable master, trainer, repairer, vendor) gets the role's icon above its name; with
+-- npccompact on (default) every friendly NPC's plate shows the name only; npcsize sizes their
+-- name. The role comes from the windows the NPC opened for you (learned by creature ID, kept in
+-- GroupChevronDB.npcroles) and, on enUS and frFR clients, from its subtitle ("<Gryphon Master>").
+-- Friendly NPC plates are a game setting (/gchev npcplates on|off sets it; the addon never changes
+-- it by itself).
 --
 -- Robustness rules (fully independent of any other addon):
 --   * Every event handler, hook and slash command runs through SafeCall (pcall): an error
@@ -288,7 +289,7 @@ end
 -- FLAG_DEFAULTS are the saved on/off settings (besides enabled and compact) and their default.
 local FLAG_DEFAULTS = {
   friendchevron = true, bnetfriends = true, guildchevron = true, classcolor = Core.DEFAULT_CLASSCOLOR, showlevel = true,
-  services = true, servicecompact = true,
+  npcicons = true, npccompact = true,
 }
 
 -- Flag returns a saved boolean setting of FLAG_DEFAULTS (its default when missing or invalid).
@@ -575,7 +576,7 @@ end
 
 -- ---------------------------------------------------------------------------------------
 -- Service NPC role icon: one texture in its own frame, a child of the plate's UnitFrame (it fades
--- and hides with the plate), ICON_SIZE x ICON_SIZE UI units at serviceiconsize 1.
+-- and hides with the plate), ICON_SIZE x ICON_SIZE UI units at npciconsize 1.
 
 local ICON_SIZE = 6
 
@@ -591,6 +592,8 @@ local function GetIcon(plate, uf)
   frame = CreateFrame("Frame", nil, uf)
   frame.tex = frame:CreateTexture(nil, "OVERLAY")
   Method(frame.tex, "SetAllPoints", frame)
+  local crop = Core.ICON_CROP
+  Method(frame.tex, "SetTexCoord", crop[1], crop[2], crop[3], crop[4])
   frame:Hide()
   icons[plate] = frame
   return frame
@@ -614,7 +617,7 @@ local function ShowIcon(plate, uf, anchor, role)
     end
     frame.path = path
   end
-  local size = ICON_SIZE * Factor("serviceiconsize")
+  local size = ICON_SIZE * Factor("npciconsize")
   frame:SetSize(size, size)
   frame:ClearAllPoints()
   frame:SetPoint("BOTTOM", anchor or uf, "TOP", 0, GAP)
@@ -1104,12 +1107,12 @@ local function HostileStyle()
   }
 end
 
--- ServiceStyle is the look of a friendly NPC with a role: its name in Blizzard's colour
--- (keepcolor), at size 1 and without a gap, and the role's icon above it (serviceiconsize).
-local function ServiceStyle(role, compact)
+-- NpcStyle is the look of a friendly NPC: its name in Blizzard's colour (keepcolor), at npcsize
+-- and without a gap, and, when it has a role (nil: none), the role's icon above it (npciconsize).
+local function NpcStyle(role, compact)
   return {
-    kind = compact and "servicecompact" or "service", keepcolor = true, chevron = false, icon = role,
-    size = Core.DEFAULT_FACTOR, scales = false, gap = Core.NO_GAP,
+    kind = compact and "npccompact" or "npc", keepcolor = true, chevron = false, icon = role,
+    size = Factor("npcsize"), scales = false, gap = Core.NO_GAP,
   }
 end
 
@@ -1601,11 +1604,12 @@ local function Apply(uf, unit, restore)
     -- A hostile unit tied to a quest: full plate, our name and single chevron in the hostile colour.
     Uncompact(uf)
     Mark(uf, uf, HostileStyle())
-  elseif mode == "service" then
-    -- A friendly NPC with a role: the role icon above its name; name only with servicecompact,
-    -- except on the target (its full plate, like the friendly players').
-    local compact = Flag("servicecompact") and info.target == false
-    Mark(uf, uf, ServiceStyle(info.service, compact))
+  elseif mode == "npc" then
+    -- A friendly NPC: the role icon above its name when it has one (and npcicons is on); name
+    -- only with npccompact, except on the target (its full plate, like the friendly players').
+    local compact = Flag("npccompact") and info.target == false
+    local role = Core.ServiceNPC(info, ModeSettings()) and info.service or nil
+    Mark(uf, uf, NpcStyle(role, compact))
     if compact then
       Compact(uf, uf, unit, nil, Core.DEFAULT_FACTOR)
     else
@@ -1873,7 +1877,7 @@ local FACTOR_KINDS = {
   chevsize = true, textsize = true, othersize = true, barsize = true, buffsize = true, otherbarsize = true,
   hostilechevsize = true, hostilesize = true, friendchevsize = true, guildchevsize = true,
   memberoutlinesize = true, friendoutlinesize = true, guildoutlinesize = true, hostileoutlinesize = true,
-  serviceiconsize = true,
+  npciconsize = true, npcsize = true,
 }
 
 -- SetFactor sets one of FACTOR_KINDS from a number (the panel's slider) or a
@@ -1954,11 +1958,11 @@ local function ResetAll()
   db.hostilecolor = Core.CopyDefaultHostileColor()
   db.classcolor = Core.DEFAULT_CLASSCOLOR
   db.showlevel = true
-  db.services = true
-  db.servicecompact = true
+  db.npcicons = true
+  db.npccompact = true
   for _, key in ipairs({ "chevsize", "textsize", "othersize", "barsize", "buffsize", "otherbarsize",
     "hostilechevsize", "hostilesize", "friendchevsize", "guildchevsize", "memberoutlinesize",
-    "friendoutlinesize", "guildoutlinesize", "hostileoutlinesize", "serviceiconsize" }) do
+    "friendoutlinesize", "guildoutlinesize", "hostileoutlinesize", "npciconsize", "npcsize" }) do
     db[key] = Core.DefaultFactor(key)
   end
   for _, key in ipairs({ "namegap", "othernamegap", "hostilenamegap" }) do
@@ -2062,7 +2066,7 @@ local function BuildPanel()
   scroll:SetPoint("TOPLEFT", panel, "TOPLEFT", 0, -4)
   scroll:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -28, 4)
   local content = CreateFrame("Frame", nil, scroll)
-  content:SetSize(600, 1440)
+  content:SetSize(600, 1480)
   scroll:SetScrollChild(content)
 
   local function Label(text, x, y, template)
@@ -2272,7 +2276,7 @@ local function BuildPanel()
 
   local reset = CreateFrame("Button", nil, content, "UIPanelButtonTemplate")
   reset:SetSize(160, 24)
-  reset:SetPoint("TOPLEFT", content, "TOPLEFT", 16, -1404)
+  reset:SetPoint("TOPLEFT", content, "TOPLEFT", 16, -1444)
   reset:SetText(L("reset"))
   reset:SetScript("OnClick", function()
     SafeCall("options reset", ResetAll)
@@ -2441,13 +2445,12 @@ local function BuildPanel()
     end)
   end
 
-  -- Service NPCs (friendly NPCs with a role): role icons, name only, the game's friendly NPC
-  -- nameplates setting and the icon size. Created last: the specs find widgets by creation order.
-  local SERVICE_Y = -1238
-  Group(L("services"), SERVICE_Y, 150)
-  local servicesBox = Checkbox(L("show_icons"), SERVICE_Y - 32, function(v) SetFlag("services", v) end)
-  local serviceCompactBox = Checkbox(L("compact"), SERVICE_Y - 32, function(v) SetFlag("servicecompact", v) end, 260)
-  local npcPlatesBox = Checkbox(L("npc_plates"), SERVICE_Y - 72, function(v)
+  -- Friendly NPCs: the game's friendly NPC nameplates setting (alone on the first row), then role
+  -- icons and name only, then the name's text size and the icon size. Created last: the specs
+  -- find widgets by creation order.
+  local NPC_Y = -1238
+  Group(L("services"), NPC_Y, 190)
+  local npcPlatesBox = Checkbox(L("npc_plates"), NPC_Y - 32, function(v)
     local ok, why = SetNpcPlates(v)
     if not ok then
       Print("friendly NPC nameplates not changed: " .. (NPC_PLATES_REFUSED[why] or tostring(why)))
@@ -2456,7 +2459,10 @@ local function BuildPanel()
       end
     end
   end)
-  sliders[#sliders + 1] = { "serviceiconsize", Slider(L("icon_size"), SERVICE_Y - 112, "serviceiconsize") }
+  local servicesBox = Checkbox(L("show_icons"), NPC_Y - 72, function(v) SetFlag("npcicons", v) end)
+  local serviceCompactBox = Checkbox(L("compact"), NPC_Y - 72, function(v) SetFlag("npccompact", v) end, 260)
+  sliders[#sliders + 1] = { "npcsize", Slider(L("text_size"), NPC_Y - 114, "npcsize") }
+  sliders[#sliders + 1] = { "npciconsize", Slider(L("icon_size"), NPC_Y - 154, "npciconsize") }
 
   -- Reads the saved settings into the controls.
   RefreshPanel = function()
@@ -2477,8 +2483,8 @@ local function BuildPanel()
       end
       classBox:SetChecked(Flag("classcolor"))
       levelBox:SetChecked(Flag("showlevel"))
-      servicesBox:SetChecked(Flag("services"))
-      serviceCompactBox:SetChecked(Flag("servicecompact"))
+      servicesBox:SetChecked(Flag("npcicons"))
+      serviceCompactBox:SetChecked(Flag("npccompact"))
       npcPlatesBox:SetChecked(NpcPlates() == true)
       for _, sl in ipairs(sliders) do
         local v = Core.GAP_KINDS[sl[1]] and Gap(sl[1]) or Factor(sl[1])
@@ -2591,11 +2597,12 @@ function handlers.PLAYER_ENTERING_WORLD()
   if FriendlyPlatesOff() then
     NoticeOnce("friendsoff", "friendly player nameplates are off (V / Shift+V): group members cannot be marked")
   end
-  -- Said once per install (the setting is the player's): the service NPC icons need NPC plates.
-  if type(db) == "table" and Flag("services") and NpcPlates() == false and not db.npcplatesnoticed then
+  -- Said once per install (the setting is the player's): the friendly NPC options need NPC plates.
+  if type(db) == "table" and (Flag("npcicons") or Flag("npccompact")) and NpcPlates() == false
+    and not db.npcplatesnoticed then
     db.npcplatesnoticed = true
-    Print("service NPC icons (flight masters, vendors...) need friendly NPC nameplates, which are off: "
-      .. "/gchev npcplates on (or /gchev services off to hide this feature)")
+    Print("the friendly NPC options (role icons above flight masters, vendors...) need friendly NPC nameplates, "
+      .. "which are off: /gchev npcplates on")
   end
   RefreshAll()
 end
@@ -2661,7 +2668,7 @@ local function OnHealth(unit)
   local mode = Core.PlateMode(info, ModeSettings())
   if mode == "compact" then
     Compact(uf, uf, unit, Level(unit, info))
-  elseif mode == "service" and Flag("servicecompact") and info.target == false and marks[uf] then
+  elseif mode == "npc" and Flag("npccompact") and info.target == false and marks[uf] then
     Compact(uf, uf, unit, nil, Core.DEFAULT_FACTOR)
   end
 end
@@ -2730,7 +2737,7 @@ end
 -- re-checked (same coalesced refresh). Both the classic events and the interaction manager's are
 -- listened to (whichever the client has; an unknown event just fails its pcall RegisterEvent).
 local function LearnFromNPC(kind)
-  if type(db) ~= "table" or not Enabled() or not Flag("services") then
+  if type(db) ~= "table" or not Enabled() or not Flag("npcicons") then
     return
   end
   local id = Core.NpcID(Try(UnitGUID, "npc"))
@@ -2903,7 +2910,7 @@ local function SlashStatus()
       n = n + 1
     elseif m.kind == "quest" then
       quests = quests + 1
-    elseif m.kind == "service" or m.kind == "servicecompact" then
+    elseif m.kind == "npc" or m.kind == "npccompact" then
       services = services + 1
     elseif m.kind == "guild" or m.kind == "guildcompact" then
       guildmates = guildmates + 1
@@ -2935,9 +2942,9 @@ local function SlashStatus()
     learned = learned + 1
   end
   local plates = NpcPlates()
-  Print(string.format("service NPCs: %s, compact %s, serviceiconsize %s, friendly NPC nameplates %s, "
-    .. "%d role(s) learned, %d plate(s) marked; %s", Flag("services") and "on" or "off",
-    Flag("servicecompact") and "on" or "off", tostring(Factor("serviceiconsize")),
+  Print(string.format("friendly NPCs: icons %s, compact %s, npcsize %s, npciconsize %s, friendly NPC nameplates %s, "
+    .. "%d role(s) learned, %d plate(s) marked; %s", Flag("npcicons") and "on" or "off",
+    Flag("npccompact") and "on" or "off", tostring(Factor("npcsize")), tostring(Factor("npciconsize")),
     plates == nil and "unknown" or (plates and "on" or "off"), learned, services, ServiceText("target", "target")))
   Print(string.format("name font: %s", tostring(db.font)))
   local c = 0
@@ -2956,7 +2963,8 @@ local function SlashStatus()
     .. " | memberoutlinesize|friendoutlinesize|guildoutlinesize|hostileoutlinesize 0-5"
     .. " | othersize 1-3 | otherbarsize 1-3 | othernamegap -10-40 | level on|off | compact on|off | classcolor on|off"
     .. " | font default|outline|chat|large|game13"
-    .. " | services on|off | servicecompact on|off | serviceiconsize 1-5 | npcplates on|off | reset | options | debug")
+    .. " | npcplates on|off | npcicons on|off | npccompact on|off | npcsize 1-3 | npciconsize 1-15"
+    .. " | reset | options | debug")
 end
 
 -- PartLabel names a plate part for /gchev debug: its frame name, else the field that holds it
