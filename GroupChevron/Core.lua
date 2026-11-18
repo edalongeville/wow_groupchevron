@@ -842,8 +842,8 @@ end
 
 -- SUBTITLES are, by client locale, the words of an NPC's subtitle (the "<Gryphon Master>" line,
 -- lower case, plain substrings) that give its role, in ROLES order. Only enUS (enGB shares it) and
--- frFR have words: on other clients only the roles learned from windows you open count. The
--- French words are not checked in game yet.
+-- frFR have words: on other clients only the roles learned from windows you open count. Of the
+-- French words, only "Maître des gryphons" is checked in game.
 Core.SUBTITLES = {
   enUS = {
     { "flight", { "gryphon master", "wind rider master", "hippogryph master", "bat handler", "flight master" } },
@@ -857,8 +857,10 @@ Core.SUBTITLES = {
       "bowyer", "gunsmith" } },
   },
   frFR = {
-    { "flight", { "griffon", "coursiers du vent", "hippogriffe", "chauves-souris", "maître de vol",
-      "maîtresse de vol" } },
+    -- The Forever client spells it "Maître des gryphons" (seen in game); the other spellings stay
+    -- in case some NPCs use them.
+    { "flight", { "gryphon", "griffon", "coursier du vent", "coursiers du vent", "hippogryphe", "hippogriffe",
+      "chauves-souris", "maître de vol", "maîtresse de vol" } },
     { "innkeeper", { "aubergiste" } },
     { "banker", { "banquier", "banquière" } },
     { "auctioneer", { "commissaire-priseu" } },

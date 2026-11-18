@@ -1621,6 +1621,9 @@ describe("Core service NPCs", function()
     assert.are.equal("trainer", Core.SubtitleRole("Blacksmithing Trainer", "enUS"))
     assert.are.equal("stable", Core.SubtitleRole("Stable Master", "enUS"))
     assert.are.equal("flight", Core.SubtitleRole("Maître des griffons", "frFR"))
+    -- As the Forever client spells it (seen in game), with or without the brackets.
+    assert.are.equal("flight", Core.SubtitleRole("Maître des gryphons", "frFR"))
+    assert.are.equal("flight", Core.SubtitleRole("<Maître des gryphons>", "frFR"))
     assert.are.equal("innkeeper", Core.SubtitleRole("Aubergiste", "frFR"))
     assert.are.equal("vendor", Core.SubtitleRole("Marchande de nourriture", "frFR"))
     -- No subtitle (the level line), no words for the locale, nothing readable: no role.
