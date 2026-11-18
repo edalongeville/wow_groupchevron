@@ -158,6 +158,7 @@ end
 local NEUTRAL_SETTINGS = {
   chevsize = 1, textsize = 1, buffsize = 1, namegap = 0, othernamegap = 0, font = "default", classcolor = false,
   hostilechevsize = 1, friendchevsize = 1, guildchevsize = 1, hostilesize = 1, hostilenamegap = 0, othersize = 1,
+  friendsize = 1, guildsize = 1,
   -- Friendly NPCs are left as Blizzard draws them unless a spec turns their options on.
   npccompact = false,
 }
@@ -399,11 +400,13 @@ describe("GroupChevron", function()
     assert.is_true(db.bnetfriends)
     assert.are.equal("#40FF40", hex(db.guildcolor))
     assert.is_true(db.guildchevron)
-    -- The hostiles start like the friendlies: chevron at the friends' chevron size, text size 1,
-    -- name height 5; the colour is yellow.
+    -- The hostiles start like the friendlies: chevron at the friends' chevron size, text size 1.5,
+    -- name height 5; the colour is yellow. Friends and guildmates: text size 1.75.
     assert.are.equal("#FFFF00", hex(db.hostilecolor))
     assert.are.equal(3, db.hostilechevsize)
-    assert.are.equal(1, db.hostilesize)
+    assert.are.equal(1.5, db.hostilesize)
+    assert.are.equal(1.75, db.friendsize)
+    assert.are.equal(1.75, db.guildsize)
     assert.are.equal(5, db.hostilenamegap)
   end)
 
@@ -1888,8 +1891,9 @@ describe("GroupChevron", function()
       looksFriend(env, plate, "#3FA7FF", true)
     end)
 
-    it("sizes a friend's full plate with othersize and otherbarsize (compact off), not the member sizes", function()
-      local env = load({ saved = { compact = false, othersize = 2, otherbarsize = 2, textsize = 3, barsize = 2 } })
+    it("sizes a friend's full plate with friendsize and otherbarsize (compact off), not the member sizes", function()
+      local env = load({ saved = { compact = false, friendsize = 2, othersize = 3, otherbarsize = 2, textsize = 3,
+        barsize = 2 } })
       local plate = newTreePlate("nameplate2")
       friend(env, plate)
       assert.are.same({}, alphas(plate))
@@ -1912,8 +1916,8 @@ describe("GroupChevron", function()
       assert.is_true((plate.UnitFrame.HealthBarsContainer.scale or 1) == 1)
     end)
 
-    it("uses the othersize and otherbarsize of compact plates", function()
-      local env = load({ saved = { othersize = 2, otherbarsize = 1.5 } })
+    it("uses the friendsize and otherbarsize of compact plates", function()
+      local env = load({ saved = { friendsize = 2, othersize = 3, otherbarsize = 1.5 } })
       local plate = newTreePlate("nameplate2")
       friend(env, plate)
       local _, holder = env.label(plate)
@@ -2107,7 +2111,7 @@ describe("GroupChevron", function()
       env.world.plates.target = plate
       env.slash("")
       assert.is_true(printedContains(env,
-        "friends: colour #3FA7FF, chevron on, Battle.net friends on, 1 plate(s) marked"))
+        "friends: colour #3FA7FF, friendsize 1, chevron on, Battle.net friends on, 1 plate(s) marked"))
       assert.is_true(printedContains(env, "friendcolor #RRGGBB | friendchevron on|off | bnetfriends on|off"))
       env.fire("PLAYER_TARGET_CHANGED")
       env.slash("debug")
@@ -2599,7 +2603,7 @@ describe("GroupChevron", function()
       env.world.target = "nameplate2"
       env.world.plates.target = plate
       env.slash("")
-      assert.is_true(printedContains(env, "guildmates: colour #40FF40, chevron on, 1 plate(s) marked"))
+      assert.is_true(printedContains(env, "guildmates: colour #40FF40, guildsize 1, chevron on, 1 plate(s) marked"))
       assert.is_true(printedContains(env, "guildcolor #RRGGBB | guildchevron on|off"))
       env.slash("debug")
       assert.is_true(printedContains(env, "debug: target guildmate: yes (UnitIsInMyGuild)"))
@@ -4147,7 +4151,13 @@ describe("GroupChevron", function()
       local npcGap = widget(rec, "Slider", 20)
       npcGap.scripts.OnValueChanged(npcGap, 8)
       assert.are.equal(8, env.GroupChevronDB.npcnamegap)
-      assert.is_nil(widget(rec, "Slider", 21))
+      -- Then the friends' and guildmates' text sizes (1..3).
+      local friendText, guildText = widget(rec, "Slider", 21), widget(rec, "Slider", 22)
+      friendText.scripts.OnValueChanged(friendText, 2.5)
+      assert.are.equal(2.5, env.GroupChevronDB.friendsize)
+      guildText.scripts.OnValueChanged(guildText, 1.25)
+      assert.are.equal(1.25, env.GroupChevronDB.guildsize)
+      assert.is_nil(widget(rec, "Slider", 23))
       assert.are.equal(2.25, env.GroupChevronDB.textsize)
 
       -- The panel shows the saved gaps when it opens.
@@ -4222,7 +4232,7 @@ describe("GroupChevron", function()
       assert.are.equal(5, db.othernamegap)
       assert.are.equal("#FFFF00", hex(db.hostilecolor))
       assert.are.equal(3, db.hostilechevsize)
-      assert.are.equal(1, db.hostilesize)
+      assert.are.equal(1.5, db.hostilesize)
       assert.are.equal(5, db.hostilenamegap)
       assert.are.equal("outline", db.font)
       assert.is_true(db.classcolor)

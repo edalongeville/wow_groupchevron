@@ -98,9 +98,11 @@ Core.MAX_FACTORS = { chevsize = 5, hostilechevsize = 5, friendchevsize = 5, guil
 Core.DEFAULT_FACTOR = 1
 -- DEFAULT_FACTORS are the defaults of the kinds that do not start at DEFAULT_FACTOR (1, which
 -- also stays the "no scaling" value the plates compare against). The hostiles start where the
--- friendlies do: the chevron at the size the friends' chevron has (chevsize); their text stays at 1
--- (the friendlies' othersize starts at 1.5 since 0.23.0).
-Core.DEFAULT_FACTORS = { chevsize = 3, textsize = 1.75, buffsize = 1.1, othersize = 1.5, hostilechevsize = 3,
+-- friendlies do: the chevron at the size the friends' chevron has (chevsize), the text at 1.5 like the
+-- friendlies' othersize (both since 0.23.0); friends and guildmates have their own text sizes
+-- (friendsize, guildsize), at the members' 1.75.
+Core.DEFAULT_FACTORS = { chevsize = 3, textsize = 1.75, buffsize = 1.1, othersize = 1.5, hostilesize = 1.5,
+  friendsize = 1.75, guildsize = 1.75, hostilechevsize = 3,
   friendchevsize = 3, guildchevsize = 3, memberoutlinesize = 2,
   friendoutlinesize = 2, guildoutlinesize = 2, hostileoutlinesize = 2, npciconsize = 5 }
 
@@ -620,7 +622,8 @@ function Core.InitDB(db)
   end
   for _, key in ipairs({ "chevsize", "textsize", "othersize", "barsize", "buffsize", "otherbarsize",
     "hostilechevsize", "hostilesize", "friendchevsize", "guildchevsize", "memberoutlinesize",
-    "friendoutlinesize", "guildoutlinesize", "hostileoutlinesize", "npciconsize", "npcsize" }) do
+    "friendoutlinesize", "guildoutlinesize", "hostileoutlinesize", "npciconsize", "npcsize", "friendsize",
+    "guildsize" }) do
     if not Core.ValidFactor(db[key], key) then
       db[key] = Core.DefaultFactor(key)
     end
@@ -680,7 +683,7 @@ Core.PAGE_KEYS = {
   players = { "compact", "color", "friendcolor", "friendchevron", "bnetfriends", "guildcolor", "guildchevron",
     "classcolor", "showlevel", "chevsize", "textsize", "othersize", "barsize", "buffsize", "otherbarsize",
     "friendchevsize", "guildchevsize", "memberoutlinesize", "friendoutlinesize", "guildoutlinesize", "namegap",
-    "othernamegap" },
+    "othernamegap", "friendsize", "guildsize" },
   quests = { "hostilecolor", "hostilechevsize", "hostilesize", "hostileoutlinesize", "hostilenamegap" },
   npcs = { "npcicons", "npccompact", "npcsize", "npciconsize", "npcnamegap" },
 }

@@ -1130,7 +1130,7 @@ local function FriendStyle(compact, level)
     r = r, g = g, b = b,
     chevron = Flag("friendchevron"),
     outlinesize = Factor("friendoutlinesize"), chevsize = "friendchevsize",
-    size = OtherFactor("othersize"),
+    size = Factor("friendsize"),
     bar = not compact and OtherFactor("otherbarsize") or nil,
     scales = false,
     level = level,
@@ -1145,7 +1145,7 @@ local function GuildStyle(compact, level)
     kind = compact and "guildcompact" or "guild",
     r = r, g = g, b = b,
     chevron = Flag("guildchevron"), outlinesize = Factor("guildoutlinesize"), chevsize = "guildchevsize",
-    size = OtherFactor("othersize"),
+    size = Factor("guildsize"),
     bar = not compact and OtherFactor("otherbarsize") or nil,
     scales = false,
     level = level,
@@ -1982,7 +1982,7 @@ local FACTOR_KINDS = {
   chevsize = true, textsize = true, othersize = true, barsize = true, buffsize = true, otherbarsize = true,
   hostilechevsize = true, hostilesize = true, friendchevsize = true, guildchevsize = true,
   memberoutlinesize = true, friendoutlinesize = true, guildoutlinesize = true, hostileoutlinesize = true,
-  npciconsize = true, npcsize = true,
+  npciconsize = true, npcsize = true, friendsize = true, guildsize = true,
 }
 
 -- SetFactor sets one of FACTOR_KINDS from a number (the panel's slider) or a
@@ -2166,7 +2166,7 @@ local function BuildPanel()
   local pages = {
     root = NewPage("GroupChevron", 120),
     main = NewPage(L("page_main"), 140),
-    players = NewPage(L("page_players"), 1010),
+    players = NewPage(L("page_players"), 1090),
     quests = NewPage(L("page_quests"), 340),
     npcs = NewPage(L("page_npcs"), 340),
   }
@@ -2285,9 +2285,9 @@ local function BuildPanel()
 
   content = pages.players.content
   Group(L("group_members"), -48, 312)
-  Group(L("friendlies"), -760, 190)
-  Group(L("friends"), -370, 182)
-  Group(L("guildmates"), -562, 182)
+  Group(L("friendlies"), -840, 190)
+  Group(L("friends"), -370, 222)
+  Group(L("guildmates"), -602, 222)
 
   -- Layout: Enabled, then the "Group members" settings, then the "Friends" ones (friends list,
   -- outside the group), then the "Guildmates" ones (in your guild, outside the group), then the
@@ -2299,7 +2299,7 @@ local function BuildPanel()
   content = pages.main.content
   local enabledBox = Checkbox(L("enabled"), -48, SetEnabled)
   content = pages.players.content
-  local compactBox = Checkbox(L("compact"), -792, SetCompact)
+  local compactBox = Checkbox(L("compact"), -872, SetCompact)
 
   -- Name colour: a swatch that opens the colour picker (live apply, Cancel restores).
   Label(L("name_colour"), 16, -88)
@@ -2374,15 +2374,15 @@ local function BuildPanel()
   local sliders = {
     { "chevsize", Slider(L("chevron_size"), -168, "chevsize") },
     { "textsize", Slider(L("text_size"), -208, "textsize") },
-    { "othersize", Slider(L("text_size"), -834, "othersize") },
+    { "othersize", Slider(L("text_size"), -914, "othersize") },
     { "barsize", Slider(L("bar_size"), -248, "barsize") },
     { "buffsize", Slider(L("buffs_size"), -288, "buffsize") },
-    { "otherbarsize", Slider(L("bar_size"), -874, "otherbarsize") },
+    { "otherbarsize", Slider(L("bar_size"), -954, "otherbarsize") },
     { "namegap", Slider(L("name_gap"), -328, "namegap") },
-    { "othernamegap", Slider(L("name_gap"), -914, "othernamegap") },
+    { "othernamegap", Slider(L("name_gap"), -994, "othernamegap") },
     { "memberoutlinesize", Slider(L("outline_size"), -128, "memberoutlinesize", OUTLINE_GEOMETRY) },
     { "friendoutlinesize", Slider(L("outline_size"), -450, "friendoutlinesize", OUTLINE_GEOMETRY) },
-    { "guildoutlinesize", Slider(L("outline_size"), -642, "guildoutlinesize", OUTLINE_GEOMETRY) },
+    { "guildoutlinesize", Slider(L("outline_size"), -682, "guildoutlinesize", OUTLINE_GEOMETRY) },
   }
 
   -- ResetButton adds, at y on the current page, a Reset button that resets that page only.
@@ -2403,18 +2403,18 @@ local function BuildPanel()
   content = pages.players.content
   Label(L("name_colour"), 16, -410)
   local friendFill = Swatch(-404, FriendColor, SetFriendColor, "friendcolor")
-  local friendChevronBox = Checkbox(L("show_chevron"), -512, function(v) SetFlag("friendchevron", v) end)
-  local bnetBox = Checkbox(L("bnet_friends"), -512, function(v) SetFlag("bnetfriends", v) end, 200)
+  local friendChevronBox = Checkbox(L("show_chevron"), -552, function(v) SetFlag("friendchevron", v) end)
+  local bnetBox = Checkbox(L("bnet_friends"), -552, function(v) SetFlag("bnetfriends", v) end, 200)
 
   -- Guildmates (in your guild, outside your group, not on your friends list).
-  Label(L("name_colour"), 16, -602)
-  local guildFill = Swatch(-596, GuildColor, SetGuildColor, "guildcolor")
-  local guildChevronBox = Checkbox(L("show_chevron"), -704, function(v) SetFlag("guildchevron", v) end)
+  Label(L("name_colour"), 16, -642)
+  local guildFill = Swatch(-636, GuildColor, SetGuildColor, "guildcolor")
+  local guildChevronBox = Checkbox(L("show_chevron"), -784, function(v) SetFlag("guildchevron", v) end)
 
   -- Friendlies: the class colour, beside "Compact plates".
-  local classBox = Checkbox(L("class_colour"), -792, function(v) SetFlag("classcolor", v) end, 260)
+  local classBox = Checkbox(L("class_colour"), -872, function(v) SetFlag("classcolor", v) end, 260)
   -- Friendlies: show level, beside "Class colour" (created last, see above).
-  local levelBox = Checkbox(L("show_level"), -792, function(v) SetFlag("showlevel", v) end, 440)
+  local levelBox = Checkbox(L("show_level"), -872, function(v) SetFlag("showlevel", v) end, 440)
 
   -- Live chevron previews beside the colour swatches: the same texture, tinted with the chosen colour,
   -- with the black outline of the section's thickness (none at 0). Textures of the content frame (no
@@ -2493,7 +2493,7 @@ local function BuildPanel()
   end
   Preview(-82, false, Color, "memberoutlinesize", "chevsize")
   Preview(-404, false, FriendColor, "friendoutlinesize", "friendchevsize")
-  Preview(-596, false, GuildColor, "guildoutlinesize", "guildchevsize")
+  Preview(-636, false, GuildColor, "guildoutlinesize", "guildchevsize")
 
   -- Hostiles (enemies tied to one of your quests): name colour (name and chevron), then the
   -- chevron size, text size and name height sliders. Created after the other sections and
@@ -2512,7 +2512,7 @@ local function BuildPanel()
   -- creation order), right below their outline rows.
   content = pages.players.content
   sliders[#sliders + 1] = { "friendchevsize", Slider(L("chevron_size"), -490, "friendchevsize") }
-  sliders[#sliders + 1] = { "guildchevsize", Slider(L("chevron_size"), -682, "guildchevsize") }
+  sliders[#sliders + 1] = { "guildchevsize", Slider(L("chevron_size"), -722, "guildchevsize") }
   content = pages.quests.content
   Preview(-82, true, HostileColor, "hostileoutlinesize", "hostilechevsize")
 
@@ -2589,6 +2589,11 @@ local function BuildPanel()
   sliders[#sliders + 1] = { "npcsize", Slider(L("text_size"), NPC_Y - 114, "npcsize") }
   sliders[#sliders + 1] = { "npciconsize", Slider(L("icon_size"), NPC_Y - 194, "npciconsize") }
   sliders[#sliders + 1] = { "npcnamegap", Slider(L("name_gap"), NPC_Y - 154, "npcnamegap") }
+  -- The friends' and guildmates' text sizes, below their chevron sizes (created last: the specs find
+  -- sliders by creation order).
+  content = pages.players.content
+  sliders[#sliders + 1] = { "friendsize", Slider(L("text_size"), -530, "friendsize") }
+  sliders[#sliders + 1] = { "guildsize", Slider(L("text_size"), -762, "guildsize") }
 
   -- Reads the saved settings into the controls.
   RefreshPanel = function()
@@ -2626,7 +2631,7 @@ local function BuildPanel()
   -- The other pages' Reset buttons, below their sections (created last: the specs find buttons
   -- by creation order).
   content = pages.players.content
-  ResetButton(-966, "players")
+  ResetButton(-1046, "players")
   content = pages.quests.content
   ResetButton(-296, "quests")
   content = pages.npcs.content
@@ -3071,11 +3076,11 @@ local function SlashStatus()
   end
   Print(string.format("%s, colour %s, name field: %s, %d plate(s) marked", db.enabled and "on" or "off",
     Core.FormatColor(Color()), field, n))
-  Print(string.format("friends: colour %s, chevron %s, Battle.net friends %s, %d plate(s) marked; %s",
-    Core.FormatColor(FriendColor()), Flag("friendchevron") and "on" or "off", Flag("bnetfriends") and "on" or "off",
-    friends, FriendText("target", "target")))
-  Print(string.format("guildmates: colour %s, chevron %s, %d plate(s) marked; %s",
-    Core.FormatColor(GuildColor()), Flag("guildchevron") and "on" or "off", guildmates,
+  Print(string.format("friends: colour %s, friendsize %s, chevron %s, Battle.net friends %s, %d plate(s) marked; %s",
+    Core.FormatColor(FriendColor()), tostring(Factor("friendsize")), Flag("friendchevron") and "on" or "off",
+    Flag("bnetfriends") and "on" or "off", friends, FriendText("target", "target")))
+  Print(string.format("guildmates: colour %s, guildsize %s, chevron %s, %d plate(s) marked; %s",
+    Core.FormatColor(GuildColor()), tostring(Factor("guildsize")), Flag("guildchevron") and "on" or "off", guildmates,
     GuildText("target", "target")))
   Print(string.format("group members: chevsize %s, textsize %s, barsize %s, buffsize %s, namegap %d",
     tostring(Factor("chevsize")), tostring(Factor("textsize")), tostring(Factor("barsize")),
@@ -3114,7 +3119,8 @@ local function SlashStatus()
   Print("/gchev on | off | color #RRGGBB | chevsize 1-5 | textsize 1-3 | barsize 1-3 | buffsize 1-3"
     .. " | namegap -10-40 | friendcolor #RRGGBB | friendchevron on|off | bnetfriends on|off"
     .. " | guildcolor #RRGGBB | guildchevron on|off"
-    .. " | friendchevsize 1-5 | guildchevsize 1-5 | hostilecolor #RRGGBB | hostilechevsize 1-5"
+    .. " | friendchevsize 1-5 | guildchevsize 1-5 | friendsize 1-3 | guildsize 1-3 | hostilecolor #RRGGBB"
+    .. " | hostilechevsize 1-5"
     .. " | hostilesize 1-3 | hostilenamegap -10-40"
     .. " | memberoutlinesize|friendoutlinesize|guildoutlinesize|hostileoutlinesize 0-5"
     .. " | othersize 1-3 | otherbarsize 1-3 | othernamegap -10-40 | level on|off | compact on|off | classcolor on|off"

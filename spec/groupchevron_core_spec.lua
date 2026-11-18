@@ -286,6 +286,20 @@ describe("GroupChevron Core", function()
     end)
   end)
 
+  describe("friend and guild text sizes", function()
+    it("default to the members' 1.75 and keep valid saved values", function()
+      local db = Core.InitDB({})
+      assert.are.equal(1.75, db.friendsize)
+      assert.are.equal(1.75, db.guildsize)
+      db = Core.InitDB({ friendsize = 2.5, guildsize = 1, })
+      assert.are.equal(2.5, db.friendsize)
+      assert.are.equal(1, db.guildsize)
+      db = Core.InitDB({ friendsize = 4, guildsize = "x" })
+      assert.are.equal(1.75, db.friendsize)
+      assert.are.equal(1.75, db.guildsize)
+    end)
+  end)
+
   describe("options pages", function()
     it("puts every setting on exactly one page, except the data the addon keeps", function()
       local seen = {}
@@ -315,7 +329,7 @@ describe("GroupChevron Core", function()
       assert.are.equal("outline", db.font)
       assert.is_true(db.enabled)
       assert.is_true(Core.ResetPage(db, "quests"))
-      assert.are.equal(1, db.hostilesize)
+      assert.are.equal(1.5, db.hostilesize)
       assert.is_true(Core.ResetPage(db, "npcs"))
       assert.are.equal(1, db.npcsize)
       -- The learned roles and the icon choices stay.
@@ -392,7 +406,7 @@ describe("GroupChevron Core", function()
       local db = Core.InitDB(nil)
       assert.are.same({ 1, 1, 0 }, db.hostilecolor)
       assert.are.equal(Core.DefaultFactor("chevsize"), db.hostilechevsize) -- the friends' chevron size
-      assert.are.equal(1, db.hostilesize) -- not the friendlies' 1.5
+      assert.are.equal(1.5, db.hostilesize) -- the friendlies' othersize
       assert.are.equal(Core.DefaultGap("othernamegap"), db.hostilenamegap)
       assert.are_not.equal(Core.DEFAULT_HOSTILE_COLOR, Core.CopyDefaultHostileColor())
       assert.are.same(Core.DEFAULT_HOSTILE_COLOR, Core.CopyDefaultHostileColor())
@@ -410,7 +424,7 @@ describe("GroupChevron Core", function()
         db = Core.InitDB({ hostilecolor = bad, hostilechevsize = bad, hostilesize = bad })
         assert.are.same({ 1, 1, 0 }, db.hostilecolor)
         assert.are.equal(3, db.hostilechevsize)
-        assert.are.equal(1, db.hostilesize)
+        assert.are.equal(1.5, db.hostilesize)
       end
       for _, bad in ipairs({ "x", 41, -11, 2.5, 0 / 0, true }) do
         assert.are.equal(5, Core.InitDB({ hostilenamegap = bad }).hostilenamegap)
