@@ -106,6 +106,9 @@ local marks = setmetatable({}, { __mode = "k" })
 -- labels: UnitFrame -> { frame, text = our FontString, name = Blizzard's name FontString our
 -- name covers right now (faded; nil when none) } (frame created once, lazily, as its child).
 local labels = setmetatable({}, { __mode = "k" })
+-- nameFails: UnitFrame -> why ShowFullName last left Blizzard's name in place (Blizzard's size,
+-- not textsize / othersize), nil once our own name was drawn; for /gchev debug and names.
+local nameFails = setmetatable({}, { __mode = "k" })
 
 -- ---------------------------------------------------------------------------------------
 -- Helpers
@@ -740,7 +743,18 @@ local function ShowFullName(plate, uf, fs, size, r, g, b, lift, gap, level)
     fontObject = nil
   end
   local base = not fontObject and BaseFont(fs)
-  if not text or not (fontObject or base) or type(CreateFrame) ~= "function" or Method(fs, "IsShown") == false then
+  local fail
+  if not text then
+    fail = "name text unreadable (secret or empty)"
+  elseif not (fontObject or base) then
+    fail = "name font unreadable"
+  elseif type(CreateFrame) ~= "function" then
+    fail = "no CreateFrame"
+  elseif Method(fs, "IsShown") == false then
+    fail = "Blizzard's name hidden"
+  end
+  nameFails[plate] = fail
+  if fail then
     HideFullName(plate)
     return nil
   end
@@ -2978,7 +2992,7 @@ local function SlashNames()
     Print("names: no nameplates")
     return
   end
-  local seen, missing = 0, 0
+  local seen, missing, unsized = 0, 0, 0
   for _, plate in ipairs(plates) do
     local uf = UnitFrameOf(plate)
     local fs = uf and FindName(uf)
@@ -2991,11 +3005,18 @@ local function SlashNames()
         Print(string.format("names: %s %q alpha %s shown %s, remembered faded: %s", tostring(unit),
           tostring(unit and Try(UnitName, unit) or "?"), tostring(a), tostring(shown),
           fadedNames[fs] and "yes" or "no"))
+      elseif marks[uf] and not Covered(uf, fs) then
+        -- Coloured and chevroned, but Blizzard's name at Blizzard's size (not textsize).
+        unsized = unsized + 1
+        local unit = PlateUnit(plate)
+        Print(string.format("names: %s %q marked, our own name not drawn: %s", tostring(unit),
+          tostring(unit and Try(UnitName, unit) or "?"), nameFails[uf] or "reason unknown"))
       end
     end
   end
-  Print(string.format("names: %d plate(s), %d without a visible name; driver hooks: release %s (%d calls), "
-    .. "added %s (%d calls); failed name restores: %d", seen, missing, driverHooks.release and "on" or "off",
+  Print(string.format("names: %d plate(s), %d without a visible name, %d marked at Blizzard's size; driver hooks: "
+    .. "release %s (%d calls), added %s (%d calls); failed name restores: %d", seen, missing, unsized,
+    driverHooks.release and "on" or "off",
     driverHooks.releaseCalls, driverHooks.added and "on" or "off", driverHooks.addedCalls, restoreFailures))
 end
 
@@ -3079,6 +3100,10 @@ local function SlashDebug()
     Print(string.format("debug: Blizzard name alpha %s, shown %s, covered by ours: %s, faded names pending: %d",
       tostring(Method(fs0, "GetAlpha")), tostring(Method(fs0, "IsShown")), Covered(uf, fs0) and "yes" or "no",
       PendingNames()))
+    if marks[uf] and not Covered(uf, fs0) then
+      Print(string.format("debug: marked, but our own name is not drawn: %s (text %s)",
+        nameFails[uf] or "reason unknown", Raw(Field(fs0, "GetText"), fs0)))
+    end
   end
   Print(string.format("debug: driver hooks: release %s (%d calls), added %s (%d calls); failed name restores: %d",
     driverHooks.release and "on" or "off", driverHooks.releaseCalls, driverHooks.added and "on" or "off",
