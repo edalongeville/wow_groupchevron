@@ -877,7 +877,8 @@ function Core.BetterRole(a, b)
 end
 
 -- SUBTITLES are, by client locale, the words of an NPC's subtitle (the "<Gryphon Master>" line,
--- lower case, plain substrings) that give its role, in ROLES order. Only enUS (enGB shares it) and
+-- lower case, plain substrings) that give its role, in ROLES order. A word may be a list of
+-- substrings that must all be in the subtitle. Only enUS (enGB shares it) and
 -- frFR have words: on other clients only the roles learned from windows you open count. Of the
 -- French words, only "Maître des gryphons" is checked in game.
 Core.SUBTITLES = {
@@ -905,6 +906,18 @@ Core.SUBTITLES = {
     { "banker", { "banquier", "banquière" } },
     { "auctioneer", { "commissaire-priseu" } },
     { "stable", { "écuries" } },
+    -- Profession trainers read "<Profession> - <rank>" ("Enchanteur - compagnon", seen in game): a
+    -- profession name and " - " together, so "Fournitures d'enchanteur" stays a vendor.
+    { "profession", (function()
+      local out = {}
+      for _, name in ipairs({ "alchimiste", "forgeron", "forgeronne", "enchanteur", "enchanteresse", "ingénieur",
+        "ingénieure", "herboriste", "travailleur du cuir", "travailleuse du cuir", "mineur", "mineuse", "dépeceur",
+        "dépeceuse", "tailleur", "tailleuse", "couturier", "couturière", "secouriste", "pêcheur", "pêcheuse",
+        "cuisinier", "cuisinière" }) do
+        out[#out + 1] = { name, " - " }
+      end
+      return out
+    end)() },
     { "trainer", { "entraîneu", "instructeur", "instructrice" } },
     { "repair", { "armurier", "armurière", "réparation" } },
     { "vendor", { "marchand", "vendeu", "fournitures", "provisions", "nourriture", "réactifs" } },
@@ -920,9 +933,20 @@ function Core.SubtitleRole(subtitle, locale)
     return nil
   end
   local text = subtitle:lower()
+  local function has(word)
+    if type(word) == "table" then
+      for _, part in ipairs(word) do
+        if not text:find(part, 1, true) then
+          return false
+        end
+      end
+      return true
+    end
+    return text:find(word, 1, true) ~= nil
+  end
   for _, entry in ipairs(words) do
     for _, word in ipairs(entry[2]) do
-      if text:find(word, 1, true) then
+      if has(word) then
         return entry[1]
       end
     end

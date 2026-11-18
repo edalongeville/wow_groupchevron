@@ -1629,6 +1629,10 @@ describe("Core service NPCs", function()
     assert.are.equal("flight", Core.SubtitleRole("<Maître des gryphons>", "frFR"))
     assert.are.equal("innkeeper", Core.SubtitleRole("Aubergiste", "frFR"))
     assert.are.equal("vendor", Core.SubtitleRole("Marchande de nourriture", "frFR"))
+    -- French profession trainers, as the Forever client writes them (seen in game).
+    assert.are.equal("profession", Core.SubtitleRole("Enchanteur - compagnon", "frFR"))
+    assert.are.equal("profession", Core.SubtitleRole("<Travailleuse du cuir - artisan>", "frFR"))
+    assert.are.equal("vendor", Core.SubtitleRole("Fournitures d'enchanteur", "frFR"))
     -- No subtitle (the level line), no words for the locale, nothing readable: no role.
     assert.is_nil(Core.SubtitleRole("Level 30", "enUS"))
     assert.is_nil(Core.SubtitleRole("Innkeeper", "deDE"))
