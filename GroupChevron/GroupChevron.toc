@@ -18,5 +18,6 @@
 ## IconTexture: Interface\AddOns\GroupChevron\icon
 ## SavedVariables: GroupChevronDB
 
+NpcRoles.lua
 Core.lua
 GroupChevron.lua

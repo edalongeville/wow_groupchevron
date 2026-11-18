@@ -1751,6 +1751,21 @@ describe("Core service NPCs", function()
     assert.are.same({ nil, "none" }, { Core.ServiceLookup(nil, "nameplate5", {}) })
   end)
 
+  it("merges the roles shipped with the addon, learned ones first on a tie", function()
+    local saved = Core.SHIPPED_ROLES
+    Core.SHIPPED_ROLES = { [352] = "innkeeper" }
+    assert.are.same({ "innkeeper", "shipped" }, { Core.ServiceLookup(npcAPI(nil), "nameplate5", {}) })
+    assert.are.same({ "innkeeper", "shipped" },
+      { Core.ServiceLookup(npcAPI(nil), "nameplate5", { [352] = "vendor" }) })
+    assert.are.same({ "flight", "learned" }, { Core.ServiceLookup(npcAPI(nil), "nameplate5", { [352] = "flight" }) })
+    assert.are.same({ "innkeeper", "learned" },
+      { Core.ServiceLookup(npcAPI(nil), "nameplate5", { [352] = "innkeeper" }) })
+    assert.are.same({ "flight", "subtitle" },
+      { Core.ServiceLookup(npcAPI("Gryphon Master"), "nameplate5", {}) })
+    Core.SHIPPED_ROLES = saved
+    assert.are.same({}, Core.SHIPPED_ROLES)
+  end)
+
   it("asks for the role of friendly NPCs only, with the setting on", function()
     local info = Core.UnitInfo(npcAPI("Gryphon Master"), "nameplate5", ON)
     assert.are.equal("flight", info.service)

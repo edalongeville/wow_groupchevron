@@ -51,6 +51,16 @@ Bump `## Version` in `GroupChevron/GroupChevron.toc` with every change to the ad
 
 To release, run **Actions -> Release -> Run workflow** on main: it releases the `## Version` already committed in the `.toc` (nothing to choose) and fails if that version has already been released. "Dry run" only checks and tests.
 
+## Shipped NPC roles
+
+`GroupChevron/NpcRoles.lua` holds the friendly NPC roles shipped with the addon (creature ID -> role), so NPCs get their icon before anyone opens their window. To add the roles learned in game, close the game, then from the repository root:
+
+```bash
+python3 tools/npc_roles.py "<WoW>/_forever_/WTF/Account/<ACCOUNT>/SavedVariables/GroupChevron.lua"
+```
+
+Several files can be given at once (other accounts, other players). Their roles are merged into `NpcRoles.lua`; when two disagree, the better role wins, in the order of `Core.ROLES`. Never edit `NpcRoles.lua` by hand: CI checks it is in the generated form (`python3 tools/npc_roles.py --check`). Commit it with a `## Version` bump like any change to the addon.
+
 ## Disclaimer
 
 This is a personal project, and its real purpose is to experiment with AI-assisted coding. The WoW addon is mostly a harmless playground for that: small, low-stakes and easy to test. It was built with AI on purpose, and that's the point of it. Use it if it's useful to you; if it isn't, no hard feelings.

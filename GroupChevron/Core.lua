@@ -1007,6 +1007,10 @@ function Core.CleanRoles(roles)
   return roles
 end
 
+-- SHIPPED_ROLES are the roles shipped with the addon (NpcRoles.lua, loaded before this file:
+-- ns.NpcRoles, creature ID -> role key), cleaned; empty outside the game or without the file.
+Core.SHIPPED_ROLES = Core.CleanRoles(type(ns) == "table" and ns.NpcRoles or nil)
+
 -- INTERACTIONS maps the windows an NPC opens (the interaction kinds the glue listens for) to the
 -- role they show; "merchant" is "repair" when the merchant can repair, "trainer" is "profession"
 -- when the trainer teaches a profession (InteractionRole).
@@ -1112,9 +1116,11 @@ function Core.SubtitleLine(text, level)
 end
 
 -- ServiceLookup tells which role the NPC unit has: the better (BetterRole) of the role learned
--- for its creature ID (learned: creature ID -> role, see LearnRole) and the role its subtitle
--- gives in the client's locale (api.GetLocale). It returns the role (nil for none) and its source:
+-- for its creature ID (learned: creature ID -> role, see LearnRole), the role shipped with the
+-- addon for it (SHIPPED_ROLES) and the role its subtitle gives in the client's locale
+-- (api.GetLocale). It returns the role (nil for none) and its source (on a tie, in this order):
 --   "learned"  : the learned role won;
+--   "shipped"  : the shipped role won;
 --   "subtitle" : the subtitle's role won;
 --   "none"     : no role (also when an API raises an error or returns a secret value).
 -- guid is the unit's GUID when the caller already read it (else it is asked here).
@@ -1130,12 +1136,20 @@ function Core.ServiceLookup(api, unit, learned, guid)
   if not Core.ValidRole(fromLearned) then
     fromLearned = nil
   end
+  local fromShipped = id and Core.SHIPPED_ROLES[id] or nil
+  if not Core.ValidRole(fromShipped) then
+    fromShipped = nil
+  end
   local fromSubtitle = Core.SubtitleRole(Core.TooltipSubtitle(api, unit), call(api, "GetLocale"))
-  local role = Core.BetterRole(fromLearned, fromSubtitle)
+  local role = Core.BetterRole(Core.BetterRole(fromLearned, fromShipped), fromSubtitle)
   if role == nil then
     return nil, "none"
+  elseif role == fromLearned then
+    return role, "learned"
+  elseif role == fromShipped then
+    return role, "shipped"
   end
-  return role, role == fromLearned and "learned" or "subtitle"
+  return role, "subtitle"
 end
 
 -- readRGB returns the r, g, b (numbers in 0..1, none secret) of a class colour c: a ColorMixin

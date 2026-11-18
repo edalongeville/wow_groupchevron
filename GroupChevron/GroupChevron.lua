@@ -2970,6 +2970,7 @@ end
 -- SERVICE_SOURCE_NAMES are the sources of Core.ServiceLookup, as /gchev prints them.
 local SERVICE_SOURCE_NAMES = {
   learned = "learned from its window",
+  shipped = "shipped with the addon",
   subtitle = "subtitle",
   none = "none",
 }
@@ -3054,12 +3055,18 @@ local function SlashStatus()
   for _ in pairs(type(db.npcroles) == "table" and db.npcroles or {}) do
     learned = learned + 1
   end
+  local shipped = 0
+  for _ in pairs(Core.SHIPPED_ROLES) do
+    shipped = shipped + 1
+  end
   local plates = NpcPlates()
   Print(string.format("friendly NPCs: icons %s, compact %s, npcsize %s, npcnamegap %d, npciconsize %s, "
-    .. "friendly NPC nameplates %s, %d role(s) learned, %d plate(s) marked; %s", Flag("npcicons") and "on" or "off",
+    .. "friendly NPC nameplates %s, %d role(s) learned, %d shipped, %d plate(s) marked; %s",
+    Flag("npcicons") and "on" or "off",
     Flag("npccompact") and "on" or "off", tostring(Factor("npcsize")), Gap("npcnamegap"),
     tostring(Factor("npciconsize")),
-    plates == nil and "unknown" or (plates and "on" or "off"), learned, services, ServiceText("target", "target")))
+    plates == nil and "unknown" or (plates and "on" or "off"), learned, shipped, services,
+    ServiceText("target", "target")))
   Print(string.format("name font: %s", tostring(db.font)))
   local c = 0
   for _ in pairs(hidden) do

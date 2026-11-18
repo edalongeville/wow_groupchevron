@@ -296,10 +296,14 @@ local function load(opts)
   setmetatable(env, { __index = _G })
 
   local ns = {}
-  for _, file in ipairs({ "GroupChevron/Core.lua", "GroupChevron/GroupChevron.lua" }) do
+  for _, file in ipairs({ "GroupChevron/NpcRoles.lua", "GroupChevron/Core.lua", "GroupChevron/GroupChevron.lua" }) do
     local chunk = assert(loadfile(file))
     setfenv(chunk, env)
     chunk("GroupChevron", ns)
+    -- opts.shipped stands for the roles shipped with the addon (NpcRoles.lua).
+    if file == "GroupChevron/NpcRoles.lua" and opts.shipped then
+      ns.NpcRoles = opts.shipped
+    end
   end
   env.frames, env.printed, env.hooks, env.world = frames, printed, hooks, world
   env.fire = function(event, ...)
@@ -3376,6 +3380,26 @@ describe("GroupChevron", function()
       local frame, texture = icon(env, plate)
       assert.is_true(frame.shown)
       assert.are.equal("flightmaster", texture)
+    end)
+
+    it("shows the roles shipped with the addon, and lets learned roles improve them", function()
+      local opts = npcClient({ repair = true })
+      opts.shipped = { [352] = "vendor", [7] = "bogus" }
+      local env = load(opts)
+      local plate = newTreePlate("nameplate5")
+      showNPC(env, plate)
+      assert.are.equal("levelup-icon-bag", select(2, icon(env, plate)))
+      -- The same merchant opens its window: it repairs, the better role wins.
+      env.fire("MERCHANT_SHOW")
+      env.runTimers()
+      assert.are.equal("repair", select(2, icon(env, plate)))
+      env.slash("")
+      assert.is_true(printedContains(env, "1 role(s) learned, 1 shipped"))
+      env.world.target = "nameplate5"
+      env.world.plates.target = plate
+      env.GroupChevronDB.npcroles[352] = nil
+      env.slash("debug")
+      assert.is_true(printedContains(env, "(shipped with the addon;"))
     end)
 
     it("lets the player pick a role's icon: an atlas the client has, or a texture path", function()
