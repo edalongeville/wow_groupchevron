@@ -300,9 +300,10 @@ local function load(opts)
     local chunk = assert(loadfile(file))
     setfenv(chunk, env)
     chunk("GroupChevron", ns)
-    -- opts.shipped stands for the roles shipped with the addon (NpcRoles.lua).
-    if file == "GroupChevron/NpcRoles.lua" and opts.shipped then
-      ns.NpcRoles = opts.shipped
+    -- opts.shipped stands for the roles shipped with the addon (NpcRoles.lua); the specs never
+    -- depend on the real list, which grows with every import.
+    if file == "GroupChevron/NpcRoles.lua" then
+      ns.NpcRoles = opts.shipped or {}
     end
   end
   env.frames, env.printed, env.hooks, env.world = frames, printed, hooks, world
@@ -3735,10 +3736,24 @@ describe("GroupChevron", function()
       end
       if not opts.noSettings then
         overrides.Settings = {
+          -- rec.frame / rec.name: the first category registered (GroupChevron's own); rec.pages:
+          -- name -> frame of every page, sub-categories included; rec.subs: sub-category names.
           RegisterCanvasLayoutCategory = function(frame, name)
-            rec.frame, rec.name = frame, name
-            return { GetID = function() return 42 end }
+            if not rec.frame then
+              rec.frame, rec.name = frame, name
+            end
+            rec.pages = rec.pages or {}
+            rec.pages[name] = frame
+            return { GetID = function() return 42 end, name = name }
           end,
+          RegisterCanvasLayoutSubcategory = not opts.noSubcategories and function(cat, frame, name)
+            assert(cat.name == "GroupChevron")
+            rec.subs = rec.subs or {}
+            rec.subs[#rec.subs + 1] = name
+            rec.pages = rec.pages or {}
+            rec.pages[name] = frame
+            return { GetID = function() return 43 end }
+          end or nil,
           RegisterAddOnCategory = function(cat) rec.category = cat end,
           OpenToCategory = function(id)
             if opts.openFails then
@@ -3767,11 +3782,31 @@ describe("GroupChevron", function()
       end
     end
 
+    -- page returns the content frame (the scroll child) of the options page called name.
+    local function page(rec, name)
+      for _, c in ipairs(rec.created) do
+        if c.kind == "ScrollFrame" and c.parent == rec.pages[name] then
+          return c.f.scrollChild
+        end
+      end
+    end
+
+    -- labelY returns the y of the first label of content whose text starts with prefix.
+    local function labelY(content, prefix)
+      for _, l in ipairs(content.labels) do
+        if l.text and l.text:sub(1, #prefix) == prefix then
+          return l.points[1][5]
+        end
+      end
+    end
+
     it("registers the panel and opens it with /gchev options", function()
       local overrides, rec = widgetClient()
       local env = load({ overrides = overrides })
       assert.are.equal("GroupChevron", rec.name)
       assert.is_table(rec.category)
+      -- Its pages are sub-categories, in this order.
+      assert.are.same({ "Main", "Friendly players", "Quest mobs", "NPCs" }, rec.subs)
       env.slash("options")
       assert.are.same({ 42 }, rec.opened)
       env.slash("")
@@ -3846,68 +3881,59 @@ describe("GroupChevron", function()
       end
     end)
 
-    it("puts the options in a scroll frame whose child holds every widget", function()
+    it("gives each page a scroll frame whose child holds its widgets", function()
       local overrides, rec = widgetClient()
       load({ overrides = overrides })
-      local scroll
-      for _, c in ipairs(rec.created) do
-        if c.kind == "ScrollFrame" then
-          scroll = c
-        end
+      local contents = {}
+      for _, name in ipairs({ "GroupChevron", "Main", "Friendly players", "Quest mobs", "NPCs" }) do
+        local content = page(rec, name)
+        assert.is_table(content, name)
+        assert.are_not.equal(rec.pages[name], content)
+        contents[content] = name
       end
-      assert.is_table(scroll)
-      assert.are.equal("UIPanelScrollFrameTemplate", scroll.template)
-      assert.are.equal(rec.frame, scroll.parent)
-      local content = scroll.f.scrollChild
-      assert.is_table(content)
-      assert.are_not.equal(rec.frame, content)
       for _, kind in ipairs({ "CheckButton", "Slider", "Button" }) do
         for _, c in ipairs(rec.created) do
           if c.kind == kind then
-            assert.are.equal(content, c.parent)
+            assert.is_string(contents[c.parent])
           end
         end
       end
+      -- Main: Enabled, the name font and Reset; the category itself only says where to go.
+      assert.are.equal(page(rec, "Main"), widget(rec, "CheckButton", 1).parent)
+      assert.are.equal(page(rec, "Main"), widget(rec, "Button", 2).parent)
+      assert.is_number(labelY(page(rec, "Main"), "Name font"))
+      assert.is_number(labelY(page(rec, "GroupChevron"), "Choose a section"))
+      assert.are.equal("GroupChevron - Quest mobs", page(rec, "Quest mobs").labels[1].text)
     end)
 
-    it("orders the sections Members, Friends, Guildmates, Quest hostiles, Friendlies, Friendly NPCs, Reset", function()
+    it("falls back to one category per page without sub-categories", function()
+      local overrides, rec = widgetClient({ noSubcategories = true })
+      local env = load({ overrides = overrides })
+      assert.are.equal("GroupChevron", rec.name)
+      for _, name in ipairs({ "Main", "Friendly players", "Quest mobs", "NPCs" }) do
+        assert.is_table(rec.pages["GroupChevron - " .. name], name)
+      end
+      assert.is_false(printedContains(env, "error in"))
+    end)
+
+    it("orders the sections of each page from the top down", function()
       local overrides, rec = widgetClient()
       load({ overrides = overrides })
-      local content
-      for _, c in ipairs(rec.created) do
-        if c.kind == "ScrollFrame" then
-          content = c.f.scrollChild
-        end
-      end
-      local function labelY(prefix)
-        for _, l in ipairs(content.labels) do
-          if l.text and l.text:sub(1, #prefix) == prefix then
-            return l.points[1][5]
-          end
-        end
-      end
-      local members = labelY("Group members")
-      local friendlies = labelY("Friendlies")
-      local friends = labelY("Friends")
-      local guild = labelY("Guildmates")
-      local hostiles = labelY("Quest hostiles")
+      -- Friendly players: Members, Friends, Guildmates, Friendlies.
+      local players = page(rec, "Friendly players")
+      local members, friends = labelY(players, "Group members"), labelY(players, "Friends")
+      local guild, friendlies = labelY(players, "Guildmates"), labelY(players, "Friendlies")
       assert.is_number(members)
-      assert.is_true(members > friends)
-      assert.is_true(friends > guild)
-      assert.is_true(guild > hostiles)
-      assert.is_true(hostiles > friendlies)
-      local services = labelY("Friendly NPCs")
-      assert.is_number(services)
-      assert.is_true(friendlies > services)
-      -- Reset sits below the last section.
-      local reset = widget(rec, "Button", 2)
-      assert.is_true(services > reset.points[1][5])
-      -- In the friendly NPC section, the nameplates setting comes first, alone on its row.
-      local plates = labelY("Friendly NPC nameplates")
-      local icons = labelY("Show role icons")
+      assert.is_true(members > friends and friends > guild and guild > friendlies)
+      assert.is_number(labelY(page(rec, "Quest mobs"), "Quest hostiles"))
+      -- NPCs: the nameplates setting first, alone on its row.
+      local npcs = page(rec, "NPCs")
+      local services = labelY(npcs, "Friendly NPCs")
+      local plates = labelY(npcs, "Friendly NPC nameplates")
+      local icons = labelY(npcs, "Show role icons")
       assert.is_true(services > plates and plates > icons)
       local onRow = 0
-      for _, l in ipairs(content.labels) do
+      for _, l in ipairs(npcs.labels) do
         if l.points[1][5] == plates then
           onRow = onRow + 1
         end
@@ -3915,35 +3941,32 @@ describe("GroupChevron", function()
       assert.are.equal(1, onRow)
     end)
 
-    it("draws one bordered frame per option group, without overlap, above the Reset button", function()
+    it("draws one bordered frame per option group, without overlap on its page", function()
       local overrides, rec = widgetClient()
       load({ overrides = overrides })
-      local content
-      for _, c in ipairs(rec.created) do
-        if c.kind == "ScrollFrame" then
-          content = c.f.scrollChild
+      local total = 0
+      for name, count in pairs({ ["Friendly players"] = 4, ["Quest mobs"] = 1, NPCs = 1 }) do
+        local content = page(rec, name)
+        local boxes = {}
+        for _, c in ipairs(rec.created) do
+          if c.kind == "Frame" and c.parent == content then
+            boxes[#boxes + 1] = c.f
+          end
+        end
+        assert.are.equal(count, #boxes, name)
+        total = total + #boxes
+        -- Created in a different order than they are laid out: from the top down.
+        table.sort(boxes, function(a, b) return a.points[1][5] > b.points[1][5] end)
+        for i, b in ipairs(boxes) do
+          -- No SetBackdrop in the fake client: the four texture lines are the border.
+          assert.are.equal(4, #b.textures)
+          if i > 1 then
+            local prev = boxes[i - 1]
+            assert.is_true(prev.points[1][5] - prev.h > b.points[1][5])
+          end
         end
       end
-      local boxes = {}
-      for _, c in ipairs(rec.created) do
-        if c.kind == "Frame" and c.parent == content then
-          boxes[#boxes + 1] = c.f
-        end
-      end
-      assert.are.equal(6, #boxes)
-      -- Created in a different order than they are laid out: from the top down.
-      table.sort(boxes, function(a, b) return a.points[1][5] > b.points[1][5] end)
-      for i, b in ipairs(boxes) do
-        -- No SetBackdrop in the fake client: the four texture lines are the border.
-        assert.are.equal(4, #b.textures)
-        if i > 1 then
-          local prev = boxes[i - 1]
-          assert.is_true(prev.points[1][5] - prev.h > b.points[1][5])
-        end
-      end
-      local last = boxes[6]
-      local reset = widget(rec, "Button", 2)
-      assert.is_true(last.points[1][5] - last.h > reset.points[1][5])
+      assert.are.equal(6, total)
     end)
 
     it("uses SetBackdrop for the frame border when the client has it", function()

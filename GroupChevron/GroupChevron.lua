@@ -2161,18 +2161,36 @@ local function BuildPanel()
     or type(Settings.RegisterAddOnCategory) ~= "function" or type(CreateFrame) ~= "function" then
     return
   end
-  local panel = CreateFrame("Frame", nil, nil)
-  panel.name = "GroupChevron"
   local refreshing = false -- true while the controls are set from the saved values
 
-  -- The content is taller than the Settings window: it lives in a scroll frame (scroll bar on
-  -- the right, 28 px margin) and every widget below is a child of `content`.
-  local scroll = CreateFrame("ScrollFrame", nil, panel, "UIPanelScrollFrameTemplate")
-  scroll:SetPoint("TOPLEFT", panel, "TOPLEFT", 0, -4)
-  scroll:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -28, 4)
-  local content = CreateFrame("Frame", nil, scroll)
-  content:SetSize(600, 1520)
-  scroll:SetScrollChild(content)
+  -- The options are split into pages, like the Settings sub-categories of other addons: the
+  -- GroupChevron category itself (a title and a hint) and its sub-categories Main, Friendly
+  -- players, Quest mobs and NPCs. Each page is a scroll frame (scroll bar on the right, 28 px
+  -- margin) whose child frame holds its widgets; `content` is the page the widgets below are
+  -- created on (the helpers read it when they are called), switched before each section. Every
+  -- page refreshes all the controls when it is shown.
+  local content
+  local function NewPage(title, height)
+    local panel = CreateFrame("Frame", nil, nil)
+    panel.name = title
+    local scroll = CreateFrame("ScrollFrame", nil, panel, "UIPanelScrollFrameTemplate")
+    scroll:SetPoint("TOPLEFT", panel, "TOPLEFT", 0, -4)
+    scroll:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -28, 4)
+    local child = CreateFrame("Frame", nil, scroll)
+    child:SetSize(600, height)
+    scroll:SetScrollChild(child)
+    panel:SetScript("OnShow", function()
+      SafeCall("options panel show", RefreshPanel)
+    end)
+    return { panel = panel, content = child, title = title }
+  end
+  local pages = {
+    root = NewPage("GroupChevron", 120),
+    main = NewPage(L("page_main"), 140),
+    players = NewPage(L("page_players"), 980),
+    quests = NewPage(L("page_quests"), 300),
+    npcs = NewPage(L("page_npcs"), 300),
+  }
 
   local function Label(text, x, y, template)
     local fs = content:CreateFontString(nil, "ARTWORK", template or "GameFontHighlight")
@@ -2181,7 +2199,13 @@ local function BuildPanel()
     return fs
   end
 
-  Label("GroupChevron", 16, -16, "GameFontNormalLarge")
+  -- Page titles: "GroupChevron" on the category, "GroupChevron - <page>" on each sub-category.
+  for _, key in ipairs({ "root", "main", "players", "quests", "npcs" }) do
+    content = pages[key].content
+    Label(key == "root" and "GroupChevron" or ("GroupChevron - " .. pages[key].title), 16, -16, "GameFontNormalLarge")
+  end
+  content = pages.root.content
+  Label(L("choose_section"), 16, -52)
 
   local function Checkbox(text, y, onClick, x)
     x = x or 16
@@ -2280,10 +2304,11 @@ local function BuildPanel()
     return Label(title, 16, y - 8, "GameFontNormal")
   end
 
-  Group(L("group_members"), -84, 312)
-  Group(L("friendlies"), -1032, 190)
-  Group(L("friends"), -406, 182)
-  Group(L("guildmates"), -598, 182)
+  content = pages.players.content
+  Group(L("group_members"), -48, 312)
+  Group(L("friendlies"), -760, 190)
+  Group(L("friends"), -370, 182)
+  Group(L("guildmates"), -562, 182)
 
   -- Layout: Enabled, then the "Group members" settings, then the "Friends" ones (friends list,
   -- outside the group), then the "Guildmates" ones (in your guild, outside the group), then the
@@ -2292,12 +2317,14 @@ local function BuildPanel()
   -- The specs find widgets by creation order, so the
   -- Friends widgets, then the guild chevron checkbox, then the class colour checkbox, then the
   -- Hostiles group and finally the name font control are created last.
+  content = pages.main.content
   local enabledBox = Checkbox(L("enabled"), -48, SetEnabled)
-  local compactBox = Checkbox(L("compact"), -1064, SetCompact)
+  content = pages.players.content
+  local compactBox = Checkbox(L("compact"), -792, SetCompact)
 
   -- Name colour: a swatch that opens the colour picker (live apply, Cancel restores).
-  Label(L("name_colour"), 16, -124)
-  local fill = Swatch(-118, Color, SetColor, "color")
+  Label(L("name_colour"), 16, -88)
+  local fill = Swatch(-82, Color, SetColor, "color")
 
   -- Sliders: the value label follows the drag, the setting is applied on release (or at once
   -- when changed without dragging, e.g. the mouse wheel), so a drag does not spam RefreshAll.
@@ -2366,42 +2393,44 @@ local function BuildPanel()
 
   -- Created in this order (the specs find sliders by creation order); placed by section.
   local sliders = {
-    { "chevsize", Slider(L("chevron_size"), -204, "chevsize") },
-    { "textsize", Slider(L("text_size"), -244, "textsize") },
-    { "othersize", Slider(L("text_size"), -1106, "othersize") },
-    { "barsize", Slider(L("bar_size"), -284, "barsize") },
-    { "buffsize", Slider(L("buffs_size"), -324, "buffsize") },
-    { "otherbarsize", Slider(L("bar_size"), -1146, "otherbarsize") },
-    { "namegap", Slider(L("name_gap"), -364, "namegap") },
-    { "othernamegap", Slider(L("name_gap"), -1186, "othernamegap") },
-    { "memberoutlinesize", Slider(L("outline_size"), -164, "memberoutlinesize", OUTLINE_GEOMETRY) },
-    { "friendoutlinesize", Slider(L("outline_size"), -486, "friendoutlinesize", OUTLINE_GEOMETRY) },
-    { "guildoutlinesize", Slider(L("outline_size"), -678, "guildoutlinesize", OUTLINE_GEOMETRY) },
+    { "chevsize", Slider(L("chevron_size"), -168, "chevsize") },
+    { "textsize", Slider(L("text_size"), -208, "textsize") },
+    { "othersize", Slider(L("text_size"), -834, "othersize") },
+    { "barsize", Slider(L("bar_size"), -248, "barsize") },
+    { "buffsize", Slider(L("buffs_size"), -288, "buffsize") },
+    { "otherbarsize", Slider(L("bar_size"), -874, "otherbarsize") },
+    { "namegap", Slider(L("name_gap"), -328, "namegap") },
+    { "othernamegap", Slider(L("name_gap"), -914, "othernamegap") },
+    { "memberoutlinesize", Slider(L("outline_size"), -128, "memberoutlinesize", OUTLINE_GEOMETRY) },
+    { "friendoutlinesize", Slider(L("outline_size"), -450, "friendoutlinesize", OUTLINE_GEOMETRY) },
+    { "guildoutlinesize", Slider(L("outline_size"), -642, "guildoutlinesize", OUTLINE_GEOMETRY) },
   }
 
+  content = pages.main.content
   local reset = CreateFrame("Button", nil, content, "UIPanelButtonTemplate")
   reset:SetSize(160, 24)
-  reset:SetPoint("TOPLEFT", content, "TOPLEFT", 16, -1484)
+  reset:SetPoint("TOPLEFT", content, "TOPLEFT", 16, -96)
   reset:SetText(L("reset"))
   reset:SetScript("OnClick", function()
     SafeCall("options reset", ResetAll)
   end)
 
   -- Friends (on your friends list, outside your group).
-  Label(L("name_colour"), 16, -446)
-  local friendFill = Swatch(-440, FriendColor, SetFriendColor, "friendcolor")
-  local friendChevronBox = Checkbox(L("show_chevron"), -548, function(v) SetFlag("friendchevron", v) end)
-  local bnetBox = Checkbox(L("bnet_friends"), -548, function(v) SetFlag("bnetfriends", v) end, 200)
+  content = pages.players.content
+  Label(L("name_colour"), 16, -410)
+  local friendFill = Swatch(-404, FriendColor, SetFriendColor, "friendcolor")
+  local friendChevronBox = Checkbox(L("show_chevron"), -512, function(v) SetFlag("friendchevron", v) end)
+  local bnetBox = Checkbox(L("bnet_friends"), -512, function(v) SetFlag("bnetfriends", v) end, 200)
 
   -- Guildmates (in your guild, outside your group, not on your friends list).
-  Label(L("name_colour"), 16, -638)
-  local guildFill = Swatch(-632, GuildColor, SetGuildColor, "guildcolor")
-  local guildChevronBox = Checkbox(L("show_chevron"), -740, function(v) SetFlag("guildchevron", v) end)
+  Label(L("name_colour"), 16, -602)
+  local guildFill = Swatch(-596, GuildColor, SetGuildColor, "guildcolor")
+  local guildChevronBox = Checkbox(L("show_chevron"), -704, function(v) SetFlag("guildchevron", v) end)
 
   -- Friendlies: the class colour, beside "Compact plates".
-  local classBox = Checkbox(L("class_colour"), -1064, function(v) SetFlag("classcolor", v) end, 260)
+  local classBox = Checkbox(L("class_colour"), -792, function(v) SetFlag("classcolor", v) end, 260)
   -- Friendlies: show level, beside "Class colour" (created last, see above).
-  local levelBox = Checkbox(L("show_level"), -1064, function(v) SetFlag("showlevel", v) end, 440)
+  local levelBox = Checkbox(L("show_level"), -792, function(v) SetFlag("showlevel", v) end, 440)
 
   -- Live chevron previews beside the colour swatches: the same texture, tinted with the chosen colour,
   -- with the black outline of the section's thickness (none at 0). Textures of the content frame (no
@@ -2476,31 +2505,35 @@ local function BuildPanel()
     end
     previews[#previews + 1] = { thicknessKind = thicknessKind, sizeKind = sizeKind, update = Update }
   end
-  Preview(-118, false, Color, "memberoutlinesize", "chevsize")
-  Preview(-440, false, FriendColor, "friendoutlinesize", "friendchevsize")
-  Preview(-632, false, GuildColor, "guildoutlinesize", "guildchevsize")
+  Preview(-82, false, Color, "memberoutlinesize", "chevsize")
+  Preview(-404, false, FriendColor, "friendoutlinesize", "friendchevsize")
+  Preview(-596, false, GuildColor, "guildoutlinesize", "guildchevsize")
 
   -- Hostiles (enemies tied to one of your quests): name colour (name and chevron), then the
   -- chevron size, text size and name height sliders. Created after the other sections and
   -- before the font control, so the existing widgets keep their creation order.
-  Group(L("hostiles"), -790, 232)
-  Label(L("name_colour"), 16, -830)
-  local hostileFill = Swatch(-824, HostileColor, SetHostileColor, "hostilecolor")
-  sliders[#sliders + 1] = { "hostilechevsize", Slider(L("chevron_size"), -910, "hostilechevsize") }
-  sliders[#sliders + 1] = { "hostilesize", Slider(L("text_size"), -950, "hostilesize") }
-  sliders[#sliders + 1] = { "hostilenamegap", Slider(L("name_gap"), -990, "hostilenamegap") }
+  content = pages.quests.content
+  Group(L("hostiles"), -48, 232)
+  Label(L("name_colour"), 16, -88)
+  local hostileFill = Swatch(-82, HostileColor, SetHostileColor, "hostilecolor")
+  sliders[#sliders + 1] = { "hostilechevsize", Slider(L("chevron_size"), -168, "hostilechevsize") }
+  sliders[#sliders + 1] = { "hostilesize", Slider(L("text_size"), -208, "hostilesize") }
+  sliders[#sliders + 1] = { "hostilenamegap", Slider(L("name_gap"), -248, "hostilenamegap") }
   sliders[#sliders + 1] = {
-    "hostileoutlinesize", Slider(L("outline_size"), -870, "hostileoutlinesize", OUTLINE_GEOMETRY),
+    "hostileoutlinesize", Slider(L("outline_size"), -128, "hostileoutlinesize", OUTLINE_GEOMETRY),
   }
   -- The chevron sizes of the friends and of the guildmates (created last: the specs find sliders by
   -- creation order), right below their outline rows.
-  sliders[#sliders + 1] = { "friendchevsize", Slider(L("chevron_size"), -526, "friendchevsize") }
-  sliders[#sliders + 1] = { "guildchevsize", Slider(L("chevron_size"), -718, "guildchevsize") }
-  Preview(-824, true, HostileColor, "hostileoutlinesize", "hostilechevsize")
+  content = pages.players.content
+  sliders[#sliders + 1] = { "friendchevsize", Slider(L("chevron_size"), -490, "friendchevsize") }
+  sliders[#sliders + 1] = { "guildchevsize", Slider(L("chevron_size"), -682, "guildchevsize") }
+  content = pages.quests.content
+  Preview(-82, true, HostileColor, "hostileoutlinesize", "hostilechevsize")
 
   -- Name font: a drop-down listing Core.FONTS, beside the name colour of the group members.
   -- Without the client's UIDropDownMenu API it falls back to a button that cycles through them.
   -- Created last: the specs find buttons by creation order.
+  content = pages.main.content
   Label(L("name_font"), 260, -54)
   local function CurrentFont()
     return Core.FindFont(type(db) == "table" and db.font) or Core.FONTS[1]
@@ -2553,7 +2586,8 @@ local function BuildPanel()
   -- Friendly NPCs: the game's friendly NPC nameplates setting (alone on the first row), then role
   -- icons and name only, then the name's text size and the icon size. Created last: the specs
   -- find widgets by creation order.
-  local NPC_Y = -1238
+  content = pages.npcs.content
+  local NPC_Y = -48
   Group(L("services"), NPC_Y, 230)
   local npcPlatesBox = Checkbox(L("npc_plates"), NPC_Y - 32, function(v)
     local ok, why = SetNpcPlates(v)
@@ -2603,13 +2637,19 @@ local function BuildPanel()
       error(err, 0)
     end
   end
-  panel:SetScript("OnShow", function()
-    SafeCall("options panel show", RefreshPanel)
-  end)
-
-  local cat = Settings.RegisterCanvasLayoutCategory(panel, "GroupChevron")
+  -- The GroupChevron category and its sub-categories. A client without sub-categories gets one
+  -- category per page instead ("GroupChevron - <page>").
+  local cat = Settings.RegisterCanvasLayoutCategory(pages.root.panel, "GroupChevron")
   Settings.RegisterAddOnCategory(cat)
   category = cat
+  for _, key in ipairs({ "main", "players", "quests", "npcs" }) do
+    local page = pages[key]
+    local sub = Settings.RegisterCanvasLayoutSubcategory
+    if type(sub) ~= "function" or not pcall(sub, cat, page.panel, page.title) then
+      Settings.RegisterAddOnCategory(Settings.RegisterCanvasLayoutCategory(page.panel,
+        "GroupChevron - " .. page.title))
+    end
+  end
 end
 
 -- OpenOptions opens the panel (/gchev options). It may be refused in combat: never an error.
