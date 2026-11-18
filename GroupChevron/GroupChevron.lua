@@ -3311,7 +3311,7 @@ local function SlashStatus()
     .. " | npcplates on|off | softinteract on|off | npcicons on|off | npccompact on|off | npcsize 1-3"
     .. " | npcnamegap -10-40 | npciconsize 1-15"
     .. " | icon [<role> <texture or atlas>|default]"
-    .. " | reset | options | debug")
+    .. " | reset | options | debug [all]")
 end
 
 -- PartLabel names a plate part for /gchev debug: its frame name, else the field that holds it
@@ -3429,7 +3429,7 @@ local function HealthDebug(unit, uf)
   end
 end
 
-local function SlashDebug()
+local function SlashDebug(arg)
   -- ScaleDebug prints, for /gchev debug, the scales of the target's plate, its UnitFrame,
   -- Blizzard's name and our own name frame ("scale S eff E", plus "ignores parent" when it ignores
   -- its parent's scale), and both names' font object and size: run it near and far from the same
@@ -3460,6 +3460,41 @@ local function SlashDebug()
       ScaleText(uf), ScaleText(fs), FontText(fs)))
     Print(string.format("debug: scales: our name frame %s, %s", ScaleText(rec and rec.frame),
       FontText(rec and rec.text)))
+  end
+  -- /gchev debug all: the same lines for every visible plate the addon marked (not only the
+  -- target: some changes only show on plates that are not targeted), with the mark's kind, the
+  -- alpha and shown state of Blizzard's name and of each of our labels (name with level, name
+  -- alone, subtitle line), to tell a font or scale change from two labels drawn over each other.
+  if type(arg) == "string" and arg:lower() == "all" then
+    local plates = type(C_NamePlate) == "table" and Try(C_NamePlate.GetNamePlates)
+    if type(plates) ~= "table" then
+      Print("debug all: no nameplates")
+      return
+    end
+    local function Look(obj)
+      if type(obj) ~= "table" then
+        return "-"
+      end
+      return string.format("alpha %s shown %s", ValueText(Method(obj, "GetAlpha")), ValueText(Method(obj, "IsShown")))
+    end
+    local n = 0
+    for _, p in ipairs(plates) do
+      local u = UnitFrameOf(p)
+      if u and marks[u] then
+        n = n + 1
+        local unit = PlateUnit(p)
+        local rec = labels[u]
+        local fs = FindName(u)
+        Print(string.format("debug all: %s %q (%s), target %s", tostring(unit),
+          tostring(unit and Try(UnitName, unit) or "?"), tostring(marks[u].kind),
+          ValueText(unit and Try(UnitIsUnit, unit, "target"))))
+        ScaleDebug(p, u, fs)
+        Print(string.format("debug all: Blizzard name %s; ours: name %s, short %s, subtitle %s; frame %s",
+          Look(fs), Look(rec and rec.text), Look(rec and rec.short), Look(rec and rec.sub), Look(rec and rec.frame)))
+      end
+    end
+    Print(string.format("debug all: %d marked plate(s)", n))
+    return
   end
   local plate = PlateForUnit("target")
   if type(plate) ~= "table" then
@@ -3584,7 +3619,7 @@ local function Slash(msg)
     cmd = "classcolor"
   end
   if cmd == "debug" then
-    SlashDebug()
+    SlashDebug(arg)
     return
   end
   if cmd == "names" then
