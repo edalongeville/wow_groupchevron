@@ -1683,6 +1683,16 @@ describe("Core service NPCs", function()
     assert.are.same({}, Core.InitDB({}).roleicons)
   end)
 
+  it("reads a unit's guild name, never a secret, an error or an empty name", function()
+    assert.are.equal("Ordo", Core.GuildName({ GetGuildInfo = function() return "Ordo", "Officer", 1 end }, "u"))
+    assert.is_nil(Core.GuildName({ GetGuildInfo = function() return nil end }, "u"))
+    assert.is_nil(Core.GuildName({ GetGuildInfo = function() return "" end }, "u"))
+    assert.is_nil(Core.GuildName({ GetGuildInfo = function() error("x") end }, "u"))
+    assert.is_nil(Core.GuildName({}, "u"))
+    assert.is_nil(Core.GuildName({ GetGuildInfo = function() return SECRET end,
+      issecretvalue = function(v) return v == SECRET end }, "u"))
+  end)
+
   it("reads the game's reaction colour, never a secret or a bad value", function()
     assert.are.same({ 0, 1, 0 }, { Core.ReactionColor({ UnitSelectionColor = function() return 0, 1, 0, 1 end }, "n") })
     assert.is_nil(Core.ReactionColor({}, "n"))

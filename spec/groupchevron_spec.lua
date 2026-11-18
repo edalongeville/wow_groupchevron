@@ -171,7 +171,7 @@ local function load(opts)
   -- world.classes[unit]: the unit's class token (UnitClass); C_ClassColor knows MAGE and
   -- PRIEST, RAID_CLASS_COLORS MAGE, PRIEST and WARLOCK (so WARLOCK needs the fallback).
   local world = { plates = {}, players = {}, party = {}, friends = {}, health = {}, flist = {}, bnet = {},
-    classes = {}, timers = {}, cvars = { nameplateShowFriends = "1" }, levels = {},
+    classes = {}, timers = {}, cvars = { nameplateShowFriends = "1" }, levels = {}, guilds = {},
     -- world.inGuild: the player is in a guild; world.guild[unit]: the unit is in the player's
     -- guild (UnitIsInMyGuild); world.guildCalls counts the guild questions asked.
     inGuild = false, guild = {}, guildCalls = 0,
@@ -254,6 +254,8 @@ local function load(opts)
     UnitHealthMax = function(unit) return (world.health[unit] or { 100, 100 })[2] end,
     -- world.levels[unit]: the unit's level; unknown units have none (nil: not readable).
     UnitLevel = function(unit) return world.levels[unit] end,
+    -- world.guilds[unit]: the name of the unit's guild (GetGuildInfo); unknown units have none.
+    GetGuildInfo = function(unit) return world.guilds[unit] end,
     -- hooksecurefunc("Global", fn) or hooksecurefunc(object, "Method", fn): hooks[name] = fn.
     hooksecurefunc = function(a, b, c)
       if type(a) == "table" then
@@ -2864,6 +2866,70 @@ describe("GroupChevron", function()
       env.world.classes.nameplate2 = "PIRATE"
       env.slash("debug")
       assert.is_true(printedContains(env, "debug: class PIRATE, class colour none (classcolor off)"))
+    end)
+  end)
+
+  describe("guild line", function()
+    -- guildLine returns our second line on a plate (shown), or nil.
+    local function guildLine(env, plate)
+      local label, holder = env.label(plate)
+      if not label or not holder.shown then
+        return nil
+      end
+      for _, l in ipairs(holder.labels) do
+        if l ~= label and l.shown ~= false and type(l.text) == "string" and l.text:sub(1, 1) == "<" then
+          return l, label
+        end
+      end
+      return nil
+    end
+
+    it("puts the guild on a second line under every friendly player's name, our name above it", function()
+      local env = load()
+      -- A group member, a compact friendly player and a friendly player's full plate (compact off).
+      local member, other = newTreePlate("nameplate1"), newTreePlate("nameplate2")
+      env.world.plates.nameplate1, env.world.plates.nameplate2 = member, other
+      for _, u in ipairs({ "nameplate1", "nameplate2" }) do
+        env.world.players[u], env.world.friends[u] = true, true
+      end
+      env.world.party.nameplate1 = true
+      env.world.guilds.nameplate1, env.world.guilds.nameplate2 = "Les Gardiens", "Ordo"
+      env.fire("NAME_PLATE_UNIT_ADDED", "nameplate1")
+      env.fire("NAME_PLATE_UNIT_ADDED", "nameplate2")
+      local sub, label = guildLine(env, member)
+      assert.are.equal("<Les Gardiens>", sub.text)
+      assert.are.equal(member.UnitFrame.name, sub.points[1][2])
+      assert.are.equal(sub, label.points[1][2])
+      assert.are.equal("#FF4FD8", hex(sub.color)) -- the name's colour
+      assert.are.equal("<Ordo>", (guildLine(env, other)).text)
+      -- It stays through health updates of the compact plate.
+      env.world.health.nameplate2 = { 50, 100 }
+      env.fire("UNIT_HEALTH", "nameplate2")
+      assert.are.equal("<Ordo>", (guildLine(env, other)).text)
+      -- Compact off: the full plate gets our name (to carry the line) even at size 1, no gap.
+      env.slash("compact off")
+      assert.are.equal("<Ordo>", (guildLine(env, other)).text)
+      -- Leaving the guild: no second line, our name back on Blizzard's.
+      env.world.guilds.nameplate1 = nil
+      env.fire("GROUP_ROSTER_UPDATE")
+      assert.is_nil(guildLine(env, member))
+      local l1 = env.label(member)
+      assert.are.equal(member.UnitFrame.name, l1.points[1][2])
+    end)
+
+    it("draws nothing for players without a guild, or when it cannot be read", function()
+      for _, overrides in ipairs({ {}, { GetGuildInfo = function() error("boom") end },
+        { GetGuildInfo = function() return "secret" end, issecretvalue = function(v) return v == "secret" end } }) do
+        local env = load({ overrides = overrides, saved = { compact = false } })
+        local plate = newTreePlate("nameplate2")
+        env.world.plates.nameplate2 = plate
+        env.world.players.nameplate2, env.world.friends.nameplate2 = true, true
+        env.fire("NAME_PLATE_UNIT_ADDED", "nameplate2")
+        assert.is_nil(guildLine(env, plate))
+        -- Size 1, no gap, no guild: Blizzard's name stays.
+        assert.are.equal(1, plate.UnitFrame.name:GetAlpha())
+        assert.is_false(printedContains(env, "error in"))
+      end
     end)
   end)
 

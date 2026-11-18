@@ -1061,6 +1061,19 @@ function Core.TooltipSubtitle(api, unit)
   return text
 end
 
+-- GuildName returns the name of unit's guild (the first result of api.GetGuildInfo(unit)), or
+-- nil when it has none or it cannot be read (missing function, error, secret value, empty).
+function Core.GuildName(api, unit)
+  if type(api) ~= "table" or type(unit) ~= "string" or unit == "" or isSecret(api, unit) then
+    return nil
+  end
+  local name = call(api, "GetGuildInfo", unit)
+  if type(name) ~= "string" or name == "" then
+    return nil
+  end
+  return name
+end
+
 -- DEFAULT_NPC_COLOR is the friendly NPCs' name colour when the client gives none (a plain
 -- green, close to the game's own friendly name colour).
 Core.DEFAULT_NPC_COLOR = { 0.1, 1, 0.1 }

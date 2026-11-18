@@ -244,6 +244,8 @@ local unitAPI = {
   -- Friendly NPCs' name colour (green friendly, yellow neutral); unverified on the Forever client,
   -- missing = Core.DEFAULT_NPC_COLOR.
   UnitSelectionColor = UnitSelectionColor,
+  -- Players' guild line: GetGuildInfo(unit)'s guild name; missing = no guild line.
+  GetGuildInfo = GetGuildInfo,
   issecretvalue = issecretvalue,
 }
 
@@ -779,7 +781,7 @@ end
 -- changed. It returns
 -- our FontString (the chevron's anchor), or nil when the name stays Blizzard's (text or font
 -- unreadable, no CreateFrame, or fs not shown).
-local function ShowFullName(plate, uf, fs, size, r, g, b, lift, gap, level)
+local function ShowFullName(plate, uf, fs, size, r, g, b, lift, gap, level, subtitle)
   local plain = NameText(fs)
   local text = plain
   if text and level then
@@ -856,8 +858,33 @@ local function ShowFullName(plate, uf, fs, size, r, g, b, lift, gap, level)
   end
   -- FollowBar's texts: the name with the level (nil without a level) and the name alone.
   rec.full, rec.plain = text ~= plain and text or nil, plain
-  -- The font, for the friendly NPCs' subtitle line (see Mark).
-  rec.fontObject, rec.base = fontObject, base
+  -- A second line below the name (a friendly NPC's "<subtitle>", a player's "<guild>"), where
+  -- Blizzard's name was, with our name moved on top of it; nil: none, the name where it was.
+  if subtitle then
+    if not rec.sub then
+      rec.sub = rec.frame:CreateFontString(nil, "OVERLAY")
+      Method(rec.sub, "SetWordWrap", false)
+      Method(rec.sub, "SetJustifyH", "CENTER")
+    end
+    local sub = rec.sub
+    if fontObject then
+      sub:SetFontObject(fontObject)
+    else
+      sub:SetFont(base[1], base[2], base[3])
+    end
+    sub:SetTextColor(r, g, b, 1)
+    sub:SetText(subtitle)
+    sub:ClearAllPoints()
+    sub:SetPoint("BOTTOM", fs, "BOTTOM", 0, Core.NameOffset(lift, gap, size))
+    for _, l in ipairs({ rec.text, rec.short }) do
+      l:ClearAllPoints()
+      l:SetPoint("BOTTOM", sub, "TOP", 0, SUBTITLE_GAP)
+    end
+    Method(sub, "SetAlpha", 1)
+    sub:Show()
+  elseif rec.sub then
+    rec.sub:Hide()
+  end
   rec.name = fs
   FadeName(fs)
   rec.frame:Show()
@@ -1219,10 +1246,9 @@ local function Mark(plate, uf, style)
       .. "only the chevron is shown")
   end
   local anchor = fs
-  local lift = 0
   if fs and type(r) == "number" then
-    lift = style.scales and BuffLift(plate, uf) or 0
-    anchor = ShowFullName(plate, uf, fs, style.size, r, g, b, lift, style.gap, style.level) or fs
+    local lift = style.scales and BuffLift(plate, uf) or 0
+    anchor = ShowFullName(plate, uf, fs, style.size, r, g, b, lift, style.gap, style.level, style.subtitle) or fs
   elseif fs then
     -- Blizzard's colour cannot be read: Blizzard's name stays as it is.
     HideFullName(plate)
@@ -1230,32 +1256,6 @@ local function Mark(plate, uf, style)
   local rec = labels[plate]
   if rec then
     rec.keepLevel = style.keeplevel and true or nil
-  end
-  -- The friendly NPCs' subtitle, on its own line where Blizzard's name was, our name above it.
-  if rec and style.subtitle and anchor == rec.text then
-    if not rec.sub then
-      rec.sub = rec.frame:CreateFontString(nil, "OVERLAY")
-      Method(rec.sub, "SetWordWrap", false)
-      Method(rec.sub, "SetJustifyH", "CENTER")
-    end
-    local sub = rec.sub
-    if rec.fontObject then
-      sub:SetFontObject(rec.fontObject)
-    else
-      sub:SetFont(rec.base[1], rec.base[2], rec.base[3])
-    end
-    sub:SetTextColor(r, g, b, 1)
-    sub:SetText(style.subtitle)
-    sub:ClearAllPoints()
-    sub:SetPoint("BOTTOM", fs, "BOTTOM", 0, Core.NameOffset(lift, style.gap, style.size))
-    for _, label in ipairs({ rec.text, rec.short }) do
-      label:ClearAllPoints()
-      label:SetPoint("BOTTOM", sub, "TOP", 0, SUBTITLE_GAP)
-    end
-    Method(sub, "SetAlpha", 1)
-    sub:Show()
-  elseif rec and rec.sub then
-    rec.sub:Hide()
   end
   local chevron = style.chevron and GetChevron(plate, uf, style.single) or nil
   if chevron then
@@ -1529,7 +1529,8 @@ end
 -- apply. level is the level shown after the name of an unmarked plate (see Level), or nil; on
 -- any compact plate, FollowBar then drops the suffix while the health bar is shown. bar is the
 -- health bar's size (default otherbarsize, the friendlies'; service NPCs keep Blizzard's).
-local function Compact(plate, uf, unit, level, bar)
+-- subtitle is the second line of an unmarked plate's name (a player's "<guild>"), or nil.
+local function Compact(plate, uf, unit, level, bar, subtitle)
   local curve, alpha = HealthAlpha(unit)
   local hurt = not curve and Core.HealthMissing(unitAPI, unit)
   local marked = marks[plate] ~= nil
@@ -1538,7 +1539,7 @@ local function Compact(plate, uf, unit, level, bar)
   if fs and not marked then
     local c = ReadColor(fs)
     if c then
-      ShowFullName(plate, uf, fs, Factor("othersize"), c[1], c[2], c[3], 0, Gap("othernamegap"), level)
+      ShowFullName(plate, uf, fs, Factor("othersize"), c[1], c[2], c[3], 0, Gap("othernamegap"), level, subtitle)
     else
       HideFullName(plate)
     end
@@ -1639,11 +1640,11 @@ end
 -- own FontString so it can be sized and moved; the rest of the plate stays Blizzard's. No level:
 -- the full plate's health bar shows Blizzard's. Without a readable colour, Blizzard's name stays
 -- as it is (size 1).
-local function ShowOtherName(uf, size)
+local function ShowOtherName(uf, size, subtitle)
   local fs = FindName(uf)
   local c = fs and ReadColor(fs)
   if c then
-    ShowFullName(uf, uf, fs, size, c[1], c[2], c[3], 0, Gap("othernamegap"))
+    ShowFullName(uf, uf, fs, size, c[1], c[2], c[3], 0, Gap("othernamegap"), nil, subtitle)
   else
     HideFullName(uf)
   end
@@ -1654,15 +1655,16 @@ end
 -- only when the size is not 1 or the gap is not 0, else Blizzard's name stays; never with the
 -- level, which Blizzard's health bar shows), the health bar at
 -- otherbarsize. Any other plate (enemies, NPCs, unknown) gets its original scales back, so a
--- pooled UnitFrame never keeps a friendly's bar size.
-local function DefaultFullPlate(uf, info)
+-- pooled UnitFrame never keeps a friendly's bar size. subtitle (the player's "<guild>") is drawn
+-- below the name, which then is always ours.
+local function DefaultFullPlate(uf, info, subtitle)
   if not Core.OtherSizes(info, ModeSettings()) then
     RestoreScales(uf)
     return
   end
   local size = OtherFactor("othersize")
-  if size ~= Core.DEFAULT_FACTOR or Gap("othernamegap") ~= Core.NO_GAP then
-    ShowOtherName(uf, size)
+  if size ~= Core.DEFAULT_FACTOR or Gap("othernamegap") ~= Core.NO_GAP or subtitle then
+    ShowOtherName(uf, size, subtitle)
   end
   local bar = OtherFactor("otherbarsize")
   if bar ~= Core.DEFAULT_FACTOR then
@@ -1672,6 +1674,22 @@ local function DefaultFullPlate(uf, info)
   end
 end
 
+-- GuildLine returns "<guild>", the second line of a player's name (Core.GuildName), or nil (not
+-- a player, no guild, or the guild cannot be read).
+local function GuildLine(unit, info)
+  if type(info) ~= "table" or info.player ~= true then
+    return nil
+  end
+  local name = Core.GuildName(unitAPI, unit)
+  return name and ("<" .. name .. ">") or nil
+end
+
+-- WithGuild sets style's second line to guild ("<guild>" or nil) and returns style.
+local function WithGuild(style, guild)
+  style.subtitle = guild
+  return style
+end
+
 -- Apply gives the UnitFrame uf (both the key of the records and the frame) the mode of unit.
 -- restore is passed to Unmark: false when uf may now show another unit, whose colour Blizzard
 -- has set or will set (never restore an older colour over it).
@@ -1679,9 +1697,11 @@ local function Apply(uf, unit, restore)
   local mode, relation, info = Mode(unit)
   local class = Core.NameColor(info, ModeSettings(), relation) == "class"
   local level = Level(unit, info)
+  -- Players get their guild on a second line, whatever their look.
+  local guild = GuildLine(unit, info)
   if mode == "member" then
     Uncompact(uf)
-    Mark(uf, uf, MemberStyle())
+    Mark(uf, uf, WithGuild(MemberStyle(), guild))
   elseif mode == "quest" then
     -- A hostile unit tied to a quest: full plate, our name and single chevron in the hostile colour.
     Uncompact(uf)
@@ -1703,26 +1723,26 @@ local function Apply(uf, unit, restore)
   elseif mode == "friend" then
     -- Full plates never get the level: Blizzard's health bar shows it.
     Uncompact(uf)
-    Mark(uf, uf, RelationStyle(relation, false))
+    Mark(uf, uf, WithGuild(RelationStyle(relation, false), guild))
   elseif mode == "class" then
     Uncompact(uf)
-    Mark(uf, uf, ClassStyle(info.classColor, false))
+    Mark(uf, uf, WithGuild(ClassStyle(info.classColor, false), guild))
   elseif mode == "compact" and (relation == "friend" or relation == "guild") then
     -- Compact plates: the level, which Compact (FollowBar) drops while the health bar shows.
-    Mark(uf, uf, RelationStyle(relation, true, level))
+    Mark(uf, uf, WithGuild(RelationStyle(relation, true, level), guild))
     Compact(uf, uf, unit)
   elseif mode == "compact" and class then
-    Mark(uf, uf, ClassStyle(info.classColor, true, level))
+    Mark(uf, uf, WithGuild(ClassStyle(info.classColor, true, level), guild))
     Compact(uf, uf, unit)
   elseif mode == "compact" then
     Unmark(uf, restore)
-    Compact(uf, uf, unit, level)
+    Compact(uf, uf, unit, level, nil, guild)
   else
     Unmark(uf, restore)
     Uncompact(uf)
     -- A friendly non-member's full plate (compact off, or the target): our name for othersize
     -- and othernamegap, otherbarsize on the health bar, never the level.
-    DefaultFullPlate(uf, info)
+    DefaultFullPlate(uf, info, guild)
   end
 end
 
@@ -2753,7 +2773,7 @@ local function OnHealth(unit)
   local info = Info(unit)
   local mode = Core.PlateMode(info, ModeSettings())
   if mode == "compact" then
-    Compact(uf, uf, unit, Level(unit, info))
+    Compact(uf, uf, unit, Level(unit, info), nil, GuildLine(unit, info))
   elseif mode == "npc" and Flag("npccompact") and marks[uf] then
     Compact(uf, uf, unit, nil, Core.DEFAULT_FACTOR)
   end
