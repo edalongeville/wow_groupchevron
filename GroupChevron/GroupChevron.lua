@@ -241,6 +241,9 @@ local unitAPI = {
   -- learned from the windows NPCs open count.
   GetTooltipUnit = Field(C_TooltipInfo, "GetUnit"),
   GetLocale = GetLocale,
+  -- Friendly NPCs' name colour (green friendly, yellow neutral); unverified on the Forever client,
+  -- missing = Core.DEFAULT_NPC_COLOR.
+  UnitSelectionColor = UnitSelectionColor,
   issecretvalue = issecretvalue,
 }
 
@@ -1150,15 +1153,16 @@ local function HostileStyle()
   }
 end
 
--- NpcStyle is the look of a friendly NPC: "<name> (<level>)" in Blizzard's colour (keepcolor), at
--- npcsize and npcnamegap, the level always shown (keeplevel; level nil: not readable, the name
--- alone), its subtitle on a line below the name (nil: none), and, when it has a role (nil: none),
--- the role's icon above the name (npciconsize).
-local function NpcStyle(role, compact, level, subtitle)
+-- NpcStyle is the look of a friendly NPC: "<name> (<level>)" in the colour c ({ r, g, b }: the
+-- game's reaction colour, Core.ReactionColor), at npcsize and npcnamegap, the level always shown
+-- (keeplevel; level nil: not readable, the name alone), its subtitle on a line below the name, in
+-- angle brackets like the game's own ("<Maître des gryphons>"; nil: none), and, when it has a role
+-- (nil: none), the role's icon above the name (npciconsize).
+local function NpcStyle(role, compact, level, subtitle, c)
   return {
-    kind = compact and "npccompact" or "npc", keepcolor = true, chevron = false, icon = role,
+    kind = compact and "npccompact" or "npc", r = c[1], g = c[2], b = c[3], chevron = false, icon = role,
     size = Factor("npcsize"), scales = false, gap = Gap("npcnamegap"), level = level, keeplevel = true,
-    subtitle = subtitle,
+    subtitle = subtitle and ("<" .. subtitle .. ">") or nil,
   }
 end
 
@@ -1689,7 +1693,8 @@ local function Apply(uf, unit, restore)
     local role = Core.ServiceNPC(info, ModeSettings()) and info.service or nil
     local npcLevel = Core.UnitLevel(unitAPI, unit)
     local subtitle = Core.SubtitleLine(Core.TooltipSubtitle(unitAPI, unit), npcLevel)
-    Mark(uf, uf, NpcStyle(role, compact, npcLevel, subtitle))
+    local r, g, b = Core.ReactionColor(unitAPI, unit)
+    Mark(uf, uf, NpcStyle(role, compact, npcLevel, subtitle, r and { r, g, b } or Core.DEFAULT_NPC_COLOR))
     if compact then
       Compact(uf, uf, unit, nil, Core.DEFAULT_FACTOR)
     else

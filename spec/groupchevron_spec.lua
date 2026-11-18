@@ -3292,11 +3292,10 @@ describe("GroupChevron", function()
       assert.are.equal(30, frame.w) -- 6 x the default npciconsize 5
       -- An atlas of the client's point-of-interest icons.
       assert.are.equal("flightmaster", frame.tex.atlas)
-      -- Above our own name, which keeps Blizzard's colour.
+      -- Above our own name, in the default green: this client has no UnitSelectionColor.
       local label = env.label(plate)
       assert.are.equal(label, frame.points[1][2])
-      assert.are.equal("#0080FF", hex(label.color))
-      assert.are.equal("#0080FF", hex(uf.name.color))
+      assert.are.equal("#1AFF1A", hex(label.color))
       -- Name only (npccompact): the health bar and cast bar are faded, the icon is kept.
       assert.are.equal(0, uf.HealthBarsContainer.alpha)
       assert.are.equal(0, uf.castBar.alpha)
@@ -3373,7 +3372,7 @@ describe("GroupChevron", function()
       -- The subtitle: the last FontString of our frame, where Blizzard's name was (+ npcnamegap),
       -- our name right above it, the icon above our name.
       local sub = holder.labels[#holder.labels]
-      assert.are.equal("Maître des gryphons", sub.text)
+      assert.are.equal("<Maître des gryphons>", sub.text)
       assert.is_true(sub.shown)
       assert.are.equal(uf.name, sub.points[1][2])
       assert.are.equal(3, sub.points[1][5])
@@ -3386,6 +3385,34 @@ describe("GroupChevron", function()
       env.fire("UNIT_HEALTH", "nameplate5")
       assert.are.equal("Farbatosz Marokbar (55)", label.text)
       assert.are.equal(1, label.alpha)
+    end)
+
+    it("takes the game's reaction colour for the name, and gives Blizzard's back afterwards", function()
+      local npc = { subtitle = "Gryphon Master" }
+      local opts = npcClient(npc)
+      opts.overrides.UnitSelectionColor = function() return 1, 1, 0, 1 end -- neutral: yellow
+      local env = load(opts)
+      local plate = newTreePlate("nameplate5")
+      showNPC(env, plate)
+      local label, holder = env.label(plate)
+      assert.are.equal("#FFFF00", hex(label.color))
+      assert.are.equal("#FFFF00", hex(holder.labels[#holder.labels].color))
+      -- The plate stops being a friendly NPC: Blizzard's own colour comes back.
+      env.world.friends.nameplate5 = false
+      env.world.attackable.nameplate5 = true
+      env.fire("UNIT_LEVEL", "nameplate5")
+      assert.are.equal("#0080FF", hex(plate.UnitFrame.name.color))
+      -- A failing or secret colour: the default green.
+      for _, fn in ipairs({ function() error("boom") end, function() return "secret", 1, 1 end }) do
+        opts = npcClient({ subtitle = "Gryphon Master" })
+        opts.overrides.UnitSelectionColor = fn
+        opts.overrides.issecretvalue = function(v) return v == "secret" end
+        env = load(opts)
+        plate = newTreePlate("nameplate5")
+        showNPC(env, plate)
+        assert.are.equal("#1AFF1A", hex(env.label(plate).color))
+        assert.is_false(printedContains(env, "error in"))
+      end
     end)
 
     it("shows no subtitle line when the tooltip's second line is the level line", function()

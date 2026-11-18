@@ -1683,6 +1683,15 @@ describe("Core service NPCs", function()
     assert.are.same({}, Core.InitDB({}).roleicons)
   end)
 
+  it("reads the game's reaction colour, never a secret or a bad value", function()
+    assert.are.same({ 0, 1, 0 }, { Core.ReactionColor({ UnitSelectionColor = function() return 0, 1, 0, 1 end }, "n") })
+    assert.is_nil(Core.ReactionColor({}, "n"))
+    assert.is_nil(Core.ReactionColor({ UnitSelectionColor = function() error("x") end }, "n"))
+    assert.is_nil(Core.ReactionColor({ UnitSelectionColor = function() return 2, 0, 0 end }, "n"))
+    assert.is_nil(Core.ReactionColor({ UnitSelectionColor = function() return SECRET, 0, 0 end,
+      issecretvalue = function(v) return v == SECRET end }, "n"))
+  end)
+
   it("tells an NPC's subtitle from the level line in its place", function()
     assert.are.equal("Maître des gryphons", Core.SubtitleLine("Maître des gryphons", 55))
     assert.are.equal("Trade Supplies", Core.SubtitleLine("Trade Supplies", 30))

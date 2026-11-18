@@ -1061,6 +1061,26 @@ function Core.TooltipSubtitle(api, unit)
   return text
 end
 
+-- DEFAULT_NPC_COLOR is the friendly NPCs' name colour when the client gives none (a plain
+-- green, close to the game's own friendly name colour).
+Core.DEFAULT_NPC_COLOR = { 0.1, 1, 0.1 }
+
+-- ReactionColor returns the colour the client gives unit for selection (api.UnitSelectionColor:
+-- green for friendly, yellow for neutral), as r, g, b in 0..1, or nil when it cannot be read
+-- (missing function, error, secret value, not a colour).
+function Core.ReactionColor(api, unit)
+  if type(api) ~= "table" or type(api.UnitSelectionColor) ~= "function" or type(unit) ~= "string" or unit == ""
+    or isSecret(api, unit) then
+    return nil
+  end
+  local ok, r, g, b = pcall(api.UnitSelectionColor, unit)
+  if not ok or isSecret(api, r) or isSecret(api, g) or isSecret(api, b) or not isUnit(r) or not isUnit(g)
+    or not isUnit(b) then
+    return nil
+  end
+  return r, g, b
+end
+
 -- SubtitleLine returns the tooltip's second line (see TooltipSubtitle) when it is an NPC's
 -- subtitle ("Maître des gryphons"), or nil when it is the level line an NPC without a subtitle
 -- has there instead ("Level 12 Humanoid", "Niveau ?? Élite"): a line holding the NPC's level as a

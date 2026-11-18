@@ -89,6 +89,7 @@ read_globals = {
   "UnitLevel",
   "UnitName",
   "UnitRace",
+  "UnitSelectionColor",
   "UnitXP",
   "UnitXPMax",
   "hooksecurefunc",
