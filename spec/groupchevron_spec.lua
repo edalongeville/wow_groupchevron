@@ -3245,7 +3245,14 @@ describe("GroupChevron", function()
           end,
         },
         Enum = { PlayerInteractionType = { Merchant = 5, TaxiNode = 6 } },
-        C_Texture = { GetAtlasInfo = function(name) return name == "FlightMaster" and { width = 64 } or nil end },
+        -- The atlases of the Forever build (1.60.1.70959) the defaults use, plus "FlightMaster".
+        C_Texture = {
+          GetAtlasInfo = function(name)
+            local known = { FlightMaster = true, flightmaster = true, innkeeper = true, banker = true,
+              auctioneer = true, stablemaster = true, class = true, repair = true, food = true }
+            return known[name] and { width = 32 } or nil
+          end,
+        },
       }
       -- The friendly NPC options start from their defaults (compact on, icon size 5).
       saved = saved or {}
@@ -3266,7 +3273,7 @@ describe("GroupChevron", function()
     local function icon(env, plate)
       for _, f in ipairs(env.frames) do
         if f.parent == plate.UnitFrame and f.tex then
-          return f, f.tex.texture
+          return f, f.tex.atlas or f.tex.texture
         end
       end
       return nil
@@ -3279,10 +3286,10 @@ describe("GroupChevron", function()
       local uf = plate.UnitFrame
       local frame, texture = icon(env, plate)
       assert.is_true(frame.shown)
-      assert.are.equal("Interface\\Icons\\Ability_Mount_Gryphon_01", texture)
+      assert.are.equal("flightmaster", texture)
       assert.are.equal(30, frame.w) -- 6 x the default npciconsize 5
-      -- The icon's bevelled border is cropped.
-      assert.is_not_nil(frame.tex.texcoord)
+      -- An atlas of the client's point-of-interest icons.
+      assert.are.equal("flightmaster", frame.tex.atlas)
       -- Above our own name, which keeps Blizzard's colour.
       local label = env.label(plate)
       assert.are.equal(label, frame.points[1][2])
@@ -3301,7 +3308,7 @@ describe("GroupChevron", function()
       showNPC(env, plate)
       local frame, texture = icon(env, plate)
       assert.is_true(frame.shown)
-      assert.are.equal("Interface\\Icons\\Ability_Mount_Gryphon_01", texture)
+      assert.are.equal("flightmaster", texture)
     end)
 
     it("lets the player pick a role's icon: an atlas the client has, or a texture path", function()
@@ -3327,9 +3334,9 @@ describe("GroupChevron", function()
       -- Back to the default; /gchev icon lists them all.
       env.slash("icon flight default")
       assert.is_nil(env.GroupChevronDB.roleicons.flight)
-      assert.are.equal("Interface\\Icons\\Ability_Mount_Gryphon_01", frame.tex.texture)
+      assert.are.equal("flightmaster", frame.tex.atlas)
       env.slash("icon")
-      assert.is_true(printedContains(env, "icon vendor: Interface\\Icons\\INV_Misc_Coin_01"))
+      assert.is_true(printedContains(env, "icon vendor: food"))
       assert.is_false(printedContains(env, "error in"))
     end)
 
@@ -3354,7 +3361,7 @@ describe("GroupChevron", function()
       local plate = newTreePlate("nameplate5")
       showNPC(env, plate)
       local frame, texture = icon(env, plate)
-      assert.are.equal("Interface\\Icons\\INV_Misc_Rune_01", texture)
+      assert.are.equal("innkeeper", texture)
       assert.are.equal(12, frame.w)
       assert.is_nil(plate.UnitFrame.HealthBarsContainer.alpha)
       env.slash("npciconsize 4")
@@ -3412,13 +3419,13 @@ describe("GroupChevron", function()
       env.runTimers()
       local frame, texture = icon(env, plate)
       assert.is_true(frame.shown)
-      assert.are.equal("Interface\\Icons\\INV_Misc_Coin_01", texture)
+      assert.are.equal("food", texture)
       -- The same merchant can repair: the better role wins.
       npc.repair = true
       env.fire("PLAYER_INTERACTION_MANAGER_FRAME_SHOW", 5)
       env.runTimers()
       assert.are.equal("repair", env.GroupChevronDB.npcroles[352])
-      assert.are.equal("Interface\\Icons\\Trade_BlackSmithing", select(2, icon(env, plate)))
+      assert.are.equal("repair", select(2, icon(env, plate)))
       -- The interaction manager's taxi window: a flight master.
       env.fire("PLAYER_INTERACTION_MANAGER_FRAME_SHOW", 6)
       assert.are.equal("flight", env.GroupChevronDB.npcroles[352])

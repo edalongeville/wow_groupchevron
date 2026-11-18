@@ -800,20 +800,21 @@ end
 --
 -- ROLES lists the roles in priority order (an NPC with two roles shows the first one: an
 -- innkeeper who also sells food shows the innkeeper icon, a vendor who repairs the repair one),
--- with the client texture of each icon: 64 x 64 spell and item icons (Interface\Icons), whose
--- bevelled border the glue crops (ICON_CROP). Up to 0.23.0's first build these were the minimap
--- tracking icons, too small once enlarged. The names are the retail client's (the Forever client
--- is built on it) and are unverified on the Forever client: a texture that does not load shows no
--- icon.
+-- with the default icon of each: an atlas of the client's map / minimap point-of-interest icons
+-- (32 x 32, all in atlas 647, FileDataID 1121272), names checked in UiTextureAtlasMember for the
+-- Forever build 1.60.1.70959 (wago.tools). There is no generic merchant atlas: vendors get "food".
+-- The player can pick another icon per role (/gchev icon); a missing atlas shows no icon. The
+-- first builds used the minimap tracking textures (too low-res once enlarged), then 64 x 64
+-- Interface\Icons spell and item icons (the wrong pictures).
 Core.ROLES = {
-  { key = "flight", icon = "Interface\\Icons\\Ability_Mount_Gryphon_01" },
-  { key = "innkeeper", icon = "Interface\\Icons\\INV_Misc_Rune_01" },
-  { key = "banker", icon = "Interface\\Icons\\INV_Misc_Bag_10" },
-  { key = "auctioneer", icon = "Interface\\Icons\\INV_Scroll_03" },
-  { key = "stable", icon = "Interface\\Icons\\Ability_Hunter_BeastTaming" },
-  { key = "trainer", icon = "Interface\\Icons\\INV_Misc_Book_09" },
-  { key = "repair", icon = "Interface\\Icons\\Trade_BlackSmithing" },
-  { key = "vendor", icon = "Interface\\Icons\\INV_Misc_Coin_01" },
+  { key = "flight", icon = "flightmaster" },
+  { key = "innkeeper", icon = "innkeeper" },
+  { key = "banker", icon = "banker" },
+  { key = "auctioneer", icon = "auctioneer" },
+  { key = "stable", icon = "stablemaster" },
+  { key = "trainer", icon = "class" },
+  { key = "repair", icon = "repair" },
+  { key = "vendor", icon = "food" },
 }
 
 -- ICON_CROP is the part of an Interface\Icons texture kept (SetTexCoord left, right, top,
