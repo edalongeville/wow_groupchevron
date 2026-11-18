@@ -3342,20 +3342,63 @@ describe("GroupChevron", function()
       assert.is_false(printedContains(env, "error in"))
     end)
 
-    it("shows the target's full plate, with the icon, and never scales an NPC's health bar", function()
+    it("shows the health bar only while hurt, the target included, and never scales it", function()
       local env = load(npcClient({ subtitle = "Gryphon Master" }, { otherbarsize = 2 }))
       local plate = newTreePlate("nameplate5")
       showNPC(env, plate)
       local uf = plate.UnitFrame
-      assert.are.equal(1, uf.HealthBarsContainer:GetScale())
+      assert.are.equal(0, uf.HealthBarsContainer.alpha)
       env.world.target = "nameplate5"
       env.fire("PLAYER_TARGET_CHANGED")
-      assert.are.equal(1, uf.HealthBarsContainer.alpha)
+      assert.are.equal(0, uf.HealthBarsContainer.alpha)
       assert.is_true(icon(env, plate).shown)
-      env.world.target = nil
-      env.fire("PLAYER_TARGET_CHANGED")
+      -- Hurt: the bar shows, target or not.
+      env.world.health.nameplate5 = { 50, 100 }
+      env.fire("UNIT_HEALTH", "nameplate5")
+      assert.are.equal(1, uf.HealthBarsContainer.alpha)
+      env.world.health.nameplate5 = { 100, 100 }
+      env.fire("UNIT_HEALTH", "nameplate5")
       assert.are.equal(0, uf.HealthBarsContainer.alpha)
       assert.are.equal(1, uf.HealthBarsContainer:GetScale())
+    end)
+
+    it("shows \"<name> (<level>)\" with the subtitle below it, the level even while hurt", function()
+      local env = load(npcClient({ subtitle = "Maître des gryphons", locale = "frFR" }, { npcnamegap = 3 }))
+      local plate = newTreePlate("nameplate5")
+      env.world.levels.nameplate5 = 55
+      showNPC(env, plate)
+      local uf = plate.UnitFrame
+      local label, holder = env.label(plate)
+      assert.are.equal("Farbatosz Marokbar (55)", label.text)
+      -- The subtitle: the last FontString of our frame, where Blizzard's name was (+ npcnamegap),
+      -- our name right above it, the icon above our name.
+      local sub = holder.labels[#holder.labels]
+      assert.are.equal("Maître des gryphons", sub.text)
+      assert.is_true(sub.shown)
+      assert.are.equal(uf.name, sub.points[1][2])
+      assert.are.equal(3, sub.points[1][5])
+      assert.are.equal(sub, label.points[1][2])
+      assert.are.equal("TOP", label.points[1][3])
+      assert.are.equal(label, icon(env, plate).points[1][2])
+      assert.are.equal(label.color[1], sub.color[1])
+      -- Hurt: the bar shows and the level stays.
+      env.world.health.nameplate5 = { 50, 100 }
+      env.fire("UNIT_HEALTH", "nameplate5")
+      assert.are.equal("Farbatosz Marokbar (55)", label.text)
+      assert.are.equal(1, label.alpha)
+    end)
+
+    it("shows no subtitle line when the tooltip's second line is the level line", function()
+      local env = load(npcClient({ subtitle = "Level 12 Humanoid" }))
+      local plate = newTreePlate("nameplate5")
+      env.world.levels.nameplate5 = 12
+      showNPC(env, plate)
+      local label, holder = env.label(plate)
+      assert.are.equal("Farbatosz Marokbar (12)", label.text)
+      for _, l in ipairs(holder.labels) do
+        assert.is_true(l == label or l.text ~= "Level 12 Humanoid" or l.shown == false)
+      end
+      assert.are.equal(plate.UnitFrame.name, label.points[1][2])
     end)
 
     it("keeps Blizzard's full plate with npccompact off, and sizes the icon", function()
@@ -3534,7 +3577,7 @@ describe("GroupChevron", function()
       showNPC(env, plate)
       env.slash("")
       assert.is_true(printedContains(env,
-        "friendly NPCs: icons on, compact on, npcsize 1, npciconsize 5, friendly NPC nameplates on"))
+        "friendly NPCs: icons on, compact on, npcsize 1, npcnamegap 5, npciconsize 5, friendly NPC nameplates on"))
       assert.is_true(printedContains(env, "1 plate(s) marked"))
       env.world.target = "nameplate5"
       env.world.plates.target = plate
@@ -3928,7 +3971,11 @@ describe("GroupChevron", function()
       assert.are.equal(12, env.GroupChevronDB.npciconsize)
       iconSize.scripts.OnValueChanged(iconSize, 15.5)
       assert.are.equal(12, env.GroupChevronDB.npciconsize)
-      assert.is_nil(widget(rec, "Slider", 20))
+      -- Then the friendly NPCs' name height (-10..40).
+      local npcGap = widget(rec, "Slider", 20)
+      npcGap.scripts.OnValueChanged(npcGap, 8)
+      assert.are.equal(8, env.GroupChevronDB.npcnamegap)
+      assert.is_nil(widget(rec, "Slider", 21))
       assert.are.equal(2.25, env.GroupChevronDB.textsize)
 
       -- The panel shows the saved gaps when it opens.

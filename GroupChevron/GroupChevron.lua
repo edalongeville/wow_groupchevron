@@ -69,6 +69,7 @@ local V_HEIGHT = 5
 local STEP = 4
 local LOWER_ALPHA = 0.5
 local GAP = 2 -- between the top of the name and the bottom of the chevron
+local SUBTITLE_GAP = 1 -- between the top of a friendly NPC's subtitle and the bottom of its name
 local CHEVRON_WIDTH = V_WIDTH
 local CHEVRON_HEIGHT = V_HEIGHT + STEP
 -- The hostiles' chevron is a single "V" (the upper one of the double chevron, fully opaque), as
@@ -852,6 +853,8 @@ local function ShowFullName(plate, uf, fs, size, r, g, b, lift, gap, level)
   end
   -- FollowBar's texts: the name with the level (nil without a level) and the name alone.
   rec.full, rec.plain = text ~= plain and text or nil, plain
+  -- The font, for the friendly NPCs' subtitle line (see Mark).
+  rec.fontObject, rec.base = fontObject, base
   rec.name = fs
   FadeName(fs)
   rec.frame:Show()
@@ -1147,12 +1150,15 @@ local function HostileStyle()
   }
 end
 
--- NpcStyle is the look of a friendly NPC: its name in Blizzard's colour (keepcolor), at npcsize
--- and without a gap, and, when it has a role (nil: none), the role's icon above it (npciconsize).
-local function NpcStyle(role, compact)
+-- NpcStyle is the look of a friendly NPC: "<name> (<level>)" in Blizzard's colour (keepcolor), at
+-- npcsize and npcnamegap, the level always shown (keeplevel; level nil: not readable, the name
+-- alone), its subtitle on a line below the name (nil: none), and, when it has a role (nil: none),
+-- the role's icon above the name (npciconsize).
+local function NpcStyle(role, compact, level, subtitle)
   return {
     kind = compact and "npccompact" or "npc", keepcolor = true, chevron = false, icon = role,
-    size = Factor("npcsize"), scales = false, gap = Core.NO_GAP,
+    size = Factor("npcsize"), scales = false, gap = Gap("npcnamegap"), level = level, keeplevel = true,
+    subtitle = subtitle,
   }
 end
 
@@ -1209,12 +1215,43 @@ local function Mark(plate, uf, style)
       .. "only the chevron is shown")
   end
   local anchor = fs
+  local lift = 0
   if fs and type(r) == "number" then
-    local lift = style.scales and BuffLift(plate, uf) or 0
+    lift = style.scales and BuffLift(plate, uf) or 0
     anchor = ShowFullName(plate, uf, fs, style.size, r, g, b, lift, style.gap, style.level) or fs
   elseif fs then
     -- Blizzard's colour cannot be read: Blizzard's name stays as it is.
     HideFullName(plate)
+  end
+  local rec = labels[plate]
+  if rec then
+    rec.keepLevel = style.keeplevel and true or nil
+  end
+  -- The friendly NPCs' subtitle, on its own line where Blizzard's name was, our name above it.
+  if rec and style.subtitle and anchor == rec.text then
+    if not rec.sub then
+      rec.sub = rec.frame:CreateFontString(nil, "OVERLAY")
+      Method(rec.sub, "SetWordWrap", false)
+      Method(rec.sub, "SetJustifyH", "CENTER")
+    end
+    local sub = rec.sub
+    if rec.fontObject then
+      sub:SetFontObject(rec.fontObject)
+    else
+      sub:SetFont(rec.base[1], rec.base[2], rec.base[3])
+    end
+    sub:SetTextColor(r, g, b, 1)
+    sub:SetText(style.subtitle)
+    sub:ClearAllPoints()
+    sub:SetPoint("BOTTOM", fs, "BOTTOM", 0, Core.NameOffset(lift, style.gap, style.size))
+    for _, label in ipairs({ rec.text, rec.short }) do
+      label:ClearAllPoints()
+      label:SetPoint("BOTTOM", sub, "TOP", 0, SUBTITLE_GAP)
+    end
+    Method(sub, "SetAlpha", 1)
+    sub:Show()
+  elseif rec and rec.sub then
+    rec.sub:Hide()
   end
   local chevron = style.chevron and GetChevron(plate, uf, style.single) or nil
   if chevron then
@@ -1340,7 +1377,8 @@ end
 -- text is chosen from hurt. Only our own FontStrings are touched, never Blizzard's name.
 local function FollowBar(plate, unit, curve, alpha, barDriven, hurt)
   local rec = labels[plate]
-  if not rec or not rec.full or not rec.short then
+  if not rec or not rec.full or not rec.short or rec.keepLevel then
+    -- Friendly NPCs (keepLevel) always show "<name> (<level>)", as ShowFullName drew it.
     return
   end
   local mode = Core.LevelSuffix(curve and true or false, barDriven, hurt)
@@ -1645,11 +1683,13 @@ local function Apply(uf, unit, restore)
     Uncompact(uf)
     Mark(uf, uf, HostileStyle())
   elseif mode == "npc" then
-    -- A friendly NPC: the role icon above its name when it has one (and npcicons is on); name
-    -- only with npccompact, except on the target (its full plate, like the friendly players').
-    local compact = Flag("npccompact") and info.target == false
+    -- A friendly NPC: "<name> (<level>)", its subtitle below, the role icon above when it has one
+    -- (and npcicons is on); with npccompact, the health bar only while hurt, the target included.
+    local compact = Flag("npccompact")
     local role = Core.ServiceNPC(info, ModeSettings()) and info.service or nil
-    Mark(uf, uf, NpcStyle(role, compact))
+    local npcLevel = Core.UnitLevel(unitAPI, unit)
+    local subtitle = Core.SubtitleLine(Core.TooltipSubtitle(unitAPI, unit), npcLevel)
+    Mark(uf, uf, NpcStyle(role, compact, npcLevel, subtitle))
     if compact then
       Compact(uf, uf, unit, nil, Core.DEFAULT_FACTOR)
     else
@@ -2005,7 +2045,7 @@ local function ResetAll()
     "friendoutlinesize", "guildoutlinesize", "hostileoutlinesize", "npciconsize", "npcsize" }) do
     db[key] = Core.DefaultFactor(key)
   end
-  for _, key in ipairs({ "namegap", "othernamegap", "hostilenamegap" }) do
+  for _, key in ipairs({ "namegap", "othernamegap", "hostilenamegap", "npcnamegap" }) do
     db[key] = Core.DefaultGap(key)
   end
   db.font = Core.DEFAULT_FONT
@@ -2106,7 +2146,7 @@ local function BuildPanel()
   scroll:SetPoint("TOPLEFT", panel, "TOPLEFT", 0, -4)
   scroll:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -28, 4)
   local content = CreateFrame("Frame", nil, scroll)
-  content:SetSize(600, 1480)
+  content:SetSize(600, 1520)
   scroll:SetScrollChild(content)
 
   local function Label(text, x, y, template)
@@ -2316,7 +2356,7 @@ local function BuildPanel()
 
   local reset = CreateFrame("Button", nil, content, "UIPanelButtonTemplate")
   reset:SetSize(160, 24)
-  reset:SetPoint("TOPLEFT", content, "TOPLEFT", 16, -1444)
+  reset:SetPoint("TOPLEFT", content, "TOPLEFT", 16, -1484)
   reset:SetText(L("reset"))
   reset:SetScript("OnClick", function()
     SafeCall("options reset", ResetAll)
@@ -2489,7 +2529,7 @@ local function BuildPanel()
   -- icons and name only, then the name's text size and the icon size. Created last: the specs
   -- find widgets by creation order.
   local NPC_Y = -1238
-  Group(L("services"), NPC_Y, 190)
+  Group(L("services"), NPC_Y, 230)
   local npcPlatesBox = Checkbox(L("npc_plates"), NPC_Y - 32, function(v)
     local ok, why = SetNpcPlates(v)
     if not ok then
@@ -2502,7 +2542,8 @@ local function BuildPanel()
   local servicesBox = Checkbox(L("show_icons"), NPC_Y - 72, function(v) SetFlag("npcicons", v) end)
   local serviceCompactBox = Checkbox(L("compact"), NPC_Y - 72, function(v) SetFlag("npccompact", v) end, 260)
   sliders[#sliders + 1] = { "npcsize", Slider(L("text_size"), NPC_Y - 114, "npcsize") }
-  sliders[#sliders + 1] = { "npciconsize", Slider(L("icon_size"), NPC_Y - 154, "npciconsize") }
+  sliders[#sliders + 1] = { "npciconsize", Slider(L("icon_size"), NPC_Y - 194, "npciconsize") }
+  sliders[#sliders + 1] = { "npcnamegap", Slider(L("name_gap"), NPC_Y - 154, "npcnamegap") }
 
   -- Reads the saved settings into the controls.
   RefreshPanel = function()
@@ -2708,7 +2749,7 @@ local function OnHealth(unit)
   local mode = Core.PlateMode(info, ModeSettings())
   if mode == "compact" then
     Compact(uf, uf, unit, Level(unit, info))
-  elseif mode == "npc" and Flag("npccompact") and info.target == false and marks[uf] then
+  elseif mode == "npc" and Flag("npccompact") and marks[uf] then
     Compact(uf, uf, unit, nil, Core.DEFAULT_FACTOR)
   end
 end
@@ -2989,9 +3030,10 @@ local function SlashStatus()
     learned = learned + 1
   end
   local plates = NpcPlates()
-  Print(string.format("friendly NPCs: icons %s, compact %s, npcsize %s, npciconsize %s, friendly NPC nameplates %s, "
-    .. "%d role(s) learned, %d plate(s) marked; %s", Flag("npcicons") and "on" or "off",
-    Flag("npccompact") and "on" or "off", tostring(Factor("npcsize")), tostring(Factor("npciconsize")),
+  Print(string.format("friendly NPCs: icons %s, compact %s, npcsize %s, npcnamegap %d, npciconsize %s, "
+    .. "friendly NPC nameplates %s, %d role(s) learned, %d plate(s) marked; %s", Flag("npcicons") and "on" or "off",
+    Flag("npccompact") and "on" or "off", tostring(Factor("npcsize")), Gap("npcnamegap"),
+    tostring(Factor("npciconsize")),
     plates == nil and "unknown" or (plates and "on" or "off"), learned, services, ServiceText("target", "target")))
   Print(string.format("name font: %s", tostring(db.font)))
   local c = 0
@@ -3010,7 +3052,7 @@ local function SlashStatus()
     .. " | memberoutlinesize|friendoutlinesize|guildoutlinesize|hostileoutlinesize 0-5"
     .. " | othersize 1-3 | otherbarsize 1-3 | othernamegap -10-40 | level on|off | compact on|off | classcolor on|off"
     .. " | font default|outline|chat|large|game13"
-    .. " | npcplates on|off | npcicons on|off | npccompact on|off | npcsize 1-3 | npciconsize 1-15"
+    .. " | npcplates on|off | npcicons on|off | npccompact on|off | npcsize 1-3 | npcnamegap -10-40 | npciconsize 1-15"
     .. " | icon [<role> <texture or atlas>|default]"
     .. " | reset | options | debug")
 end

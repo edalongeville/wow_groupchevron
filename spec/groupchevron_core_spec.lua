@@ -1683,6 +1683,18 @@ describe("Core service NPCs", function()
     assert.are.same({}, Core.InitDB({}).roleicons)
   end)
 
+  it("tells an NPC's subtitle from the level line in its place", function()
+    assert.are.equal("Maître des gryphons", Core.SubtitleLine("Maître des gryphons", 55))
+    assert.are.equal("Trade Supplies", Core.SubtitleLine("Trade Supplies", 30))
+    assert.is_nil(Core.SubtitleLine("Level 12 Humanoid", 12))
+    assert.is_nil(Core.SubtitleLine("Niveau 30 Humanoïde (Élite)", 30))
+    assert.is_nil(Core.SubtitleLine("Level ?? Elite", -1))
+    -- Another number is not the level: "Level 30" when the NPC is level 3 still counts as a subtitle.
+    assert.are.equal("Level 30", Core.SubtitleLine("Level 30", 3))
+    assert.is_nil(Core.SubtitleLine("", 3))
+    assert.is_nil(Core.SubtitleLine(nil, 3))
+  end)
+
   it("cleans the saved roles", function()
     local roles = Core.CleanRoles({ [352] = "flight", [7] = "bogus", x = "vendor", [-1] = "vendor", [2.5] = "vendor" })
     assert.are.same({ [352] = "flight" }, roles)

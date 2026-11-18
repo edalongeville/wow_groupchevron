@@ -160,7 +160,7 @@ Core.MIN_GAP = -10
 Core.MAX_GAP = 40
 Core.NO_GAP = 0
 Core.DEFAULT_GAP = 5
-Core.GAP_KINDS = { namegap = true, othernamegap = true, hostilenamegap = true }
+Core.GAP_KINDS = { namegap = true, othernamegap = true, hostilenamegap = true, npcnamegap = true }
 
 -- DefaultGap is the default of a gap kind.
 function Core.DefaultGap(_)
@@ -574,7 +574,7 @@ function Core.InitDB(db)
       db[key] = Core.DefaultFactor(key)
     end
   end
-  for _, key in ipairs({ "namegap", "othernamegap", "hostilenamegap" }) do
+  for _, key in ipairs({ "namegap", "othernamegap", "hostilenamegap", "npcnamegap" }) do
     if not Core.ValidGap(db[key]) then
       db[key] = Core.DefaultGap(key)
     end
@@ -1056,6 +1056,23 @@ function Core.TooltipSubtitle(api, unit)
   end
   local ok, text = pcall(function() return data.lines[2].leftText end)
   if not ok or isSecret(api, text) or type(text) ~= "string" or text == "" then
+    return nil
+  end
+  return text
+end
+
+-- SubtitleLine returns the tooltip's second line (see TooltipSubtitle) when it is an NPC's
+-- subtitle ("Maître des gryphons"), or nil when it is the level line an NPC without a subtitle
+-- has there instead ("Level 12 Humanoid", "Niveau ?? Élite"): a line holding the NPC's level as a
+-- number of its own, or "??", is the level line. level is the NPC's level (Core.UnitLevel), or nil.
+function Core.SubtitleLine(text, level)
+  if type(text) ~= "string" or text == "" then
+    return nil
+  end
+  if text:find("??", 1, true) then
+    return nil
+  end
+  if finite(level) and level >= 1 and text:find("%f[%d]" .. string.format("%d", level) .. "%f[%D]") then
     return nil
   end
   return text
