@@ -2584,7 +2584,8 @@ local function BuildPanel()
       end
     end
   end)
-  local servicesBox = Checkbox(L("show_icons"), NPC_Y - 72, function(v) SetFlag("npcicons", v) end)
+  -- "(Beta)": the role detection is still being developed (shipped list, subtitles, learning).
+  local servicesBox = Checkbox(L("show_icons") .. " (Beta)", NPC_Y - 72, function(v) SetFlag("npcicons", v) end)
   local serviceCompactBox = Checkbox(L("compact"), NPC_Y - 72, function(v) SetFlag("npccompact", v) end, 260)
   sliders[#sliders + 1] = { "npcsize", Slider(L("text_size"), NPC_Y - 114, "npcsize") }
   sliders[#sliders + 1] = { "npciconsize", Slider(L("icon_size"), NPC_Y - 194, "npciconsize") }

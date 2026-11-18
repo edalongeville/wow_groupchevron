@@ -3962,7 +3962,7 @@ describe("GroupChevron", function()
       local npcs = page(rec, "NPCs")
       local services = labelY(npcs, "Friendly NPCs")
       local plates = labelY(npcs, "Friendly NPC nameplates")
-      local icons = labelY(npcs, "Show role icons")
+      local icons = labelY(npcs, "Show role icons (Beta)")
       assert.is_true(services > plates and plates > icons)
       local onRow = 0
       for _, l in ipairs(npcs.labels) do
