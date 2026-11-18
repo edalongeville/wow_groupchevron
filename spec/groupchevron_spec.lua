@@ -3008,6 +3008,18 @@ describe("GroupChevron", function()
       env.fire("NAME_PLATE_UNIT_ADDED", "nameplate2")
     end
 
+    it("is listed with the other marked plates by /gchev debug all, target or not", function()
+      local env = load()
+      local plate = newTreePlate("nameplate2")
+      partyHostile(env, plate)
+      env.slash("debug all")
+      assert.is_true(printedContains(env, 'debug all: nameplate2 "'))
+      assert.is_true(printedContains(env, "(partyquest), target false"))
+      assert.is_true(printedContains(env, "debug: scales: our name frame scale"))
+      assert.is_true(printedContains(env, "debug all: Blizzard name alpha 0"))
+      assert.is_true(printedContains(env, "debug all: 1 marked plate(s)"))
+    end)
+
     it("puts a white name and a single chevron on it", function()
       local env = load()
       local plate = newTreePlate("nameplate2")
