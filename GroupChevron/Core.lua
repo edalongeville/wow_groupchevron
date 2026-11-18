@@ -1566,19 +1566,44 @@ function Core.NameWithLevel(name, level)
   return name
 end
 
--- HealthMissing is true when unit's health is known to be below its maximum
--- (UnitHealth < UnitHealthMax, both readable numbers, max > 0). Full health, a dead unit
--- (health 0 still counts as missing), a missing function, an error or a secret value give
--- false: an unknown health keeps compact mode's name-only plate.
-function Core.HealthMissing(api, unit)
+-- KnownHurt returns true when unit's health is known to be below its maximum
+-- (UnitHealth < UnitHealthMax, both readable numbers, max > 0), false when it is known to be
+-- full, and nil when it cannot be known (a missing function, an error, a secret value).
+function Core.KnownHurt(api, unit)
   if type(api) ~= "table" or type(unit) ~= "string" or unit == "" or isSecret(api, unit) then
-    return false
+    return nil
   end
   local hp, max = call(api, "UnitHealth", unit), call(api, "UnitHealthMax", unit)
   if type(hp) ~= "number" or type(max) ~= "number" or hp ~= hp or max ~= max or max <= 0 then
-    return false
+    return nil
   end
   return hp < max
+end
+
+-- HealthMissing is true when unit's health is known to be below its maximum (KnownHurt).
+-- Full health, a dead unit (health 0 still counts as missing), a missing function, an error or
+-- a secret value give false: an unknown health keeps compact mode's name-only plate.
+function Core.HealthMissing(api, unit)
+  return Core.KnownHurt(api, unit) == true
+end
+
+-- NameDrops returns true when a compact plate's name goes down to where its health bar is, and
+-- false when it stays where Blizzard puts it, above the bar. Compact mode only fades the bar
+-- out (alpha 0), so it keeps its place, and a name left above it floats a bar's height above
+-- the unit. curve: the health curve answered; barDriven: the curve's alpha reached every health
+-- bar part (the bar is shown exactly while hurt); hurt: Core.HealthMissing (without the curve);
+-- knownHurt: Core.KnownHurt (with the curve). Without the curve the bar shows exactly while hurt.
+-- With a bar driven by the curve its state cannot be read (the alpha may be secret): the name
+-- goes down only when the health is readable and full, so it never covers a shown bar. With the
+-- curve but a bar it could not drive, the bar is faded: down.
+function Core.NameDrops(curve, barDriven, hurt, knownHurt)
+  if curve == true then
+    if barDriven == true then
+      return knownHurt == false
+    end
+    return true
+  end
+  return hurt ~= true
 end
 
 -- HEALTH_CURVE_POINTS are the points (health fraction, alpha) of the colour curve that turns a
@@ -1673,10 +1698,16 @@ end
 -- container (y = spacing), so SetScale alone only made it taller: width is the content width
 -- (nameplate width minus both insets, the parent's units), scale the bar's own scale before
 -- ours. Offsets are in the bar's own units once its scale is scale x f, hence the division.
--- nil for invalid input.
+-- At f = 1 the width is not needed (0, 0, spacing). nil for invalid input.
 function Core.BarOffsets(width, spacing, scale, f)
-  if not finite(width) or width <= 0 or not finite(spacing) or not finite(scale) or scale <= 0
-    or not finite(f) or f <= 0 then
+  if not finite(spacing) or not finite(scale) or scale <= 0 or not finite(f) or f <= 0 then
+    return nil
+  end
+  if f == 1 then
+    -- Blizzard's own width: nothing to widen, so the width is not needed.
+    return 0, 0, spacing
+  end
+  if not finite(width) or width <= 0 then
     return nil
   end
   local s = scale * f

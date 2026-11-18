@@ -1482,6 +1482,55 @@ describe("GroupChevron Core", function()
     end)
   end)
 
+  describe("KnownHurt", function()
+    local function api(hp, max)
+      return {
+        UnitHealth = function() return hp end,
+        UnitHealthMax = function() return max end,
+        issecretvalue = function(v) return v == SECRET end,
+      }
+    end
+
+    it("tells hurt (true) from full (false) when the health is readable", function()
+      assert.is_true(Core.KnownHurt(api(50, 100), "nameplate2"))
+      assert.is_true(Core.KnownHurt(api(0, 100), "nameplate2"))
+      assert.is_false(Core.KnownHurt(api(100, 100), "nameplate2"))
+      assert.is_false(Core.KnownHurt(api(120, 100), "nameplate2"))
+    end)
+
+    it("returns nil when the health cannot be known", function()
+      assert.is_nil(Core.KnownHurt(api(SECRET, 100), "nameplate2"))
+      assert.is_nil(Core.KnownHurt(api(50, SECRET), "nameplate2"))
+      assert.is_nil(Core.KnownHurt(api(nil, 100), "nameplate2"))
+      assert.is_nil(Core.KnownHurt(api(50, 0), "nameplate2"))
+      assert.is_nil(Core.KnownHurt(api(0 / 0, 100), "nameplate2"))
+      assert.is_nil(Core.KnownHurt(api(50, 100), SECRET))
+      assert.is_nil(Core.KnownHurt(nil, "nameplate2"))
+      local boom = api(50, 100)
+      boom.UnitHealthMax = function() error("restricted") end
+      assert.is_nil(Core.KnownHurt(boom, "nameplate2"))
+    end)
+  end)
+
+  describe("NameDrops", function()
+    it("drops the name exactly while the bar is hidden without the curve", function()
+      assert.is_true(Core.NameDrops(false, false, false, nil))
+      assert.is_false(Core.NameDrops(false, false, true, nil))
+      assert.is_true(Core.NameDrops(nil, nil, nil, nil)) -- unknown health: name-only, the bar faded
+    end)
+
+    it("drops it with a curve-driven bar only when the health is known to be full", function()
+      assert.is_true(Core.NameDrops(true, true, nil, false))
+      assert.is_false(Core.NameDrops(true, true, nil, true))
+      assert.is_false(Core.NameDrops(true, true, nil, nil)) -- secret: stays above the bar
+    end)
+
+    it("drops it when the curve could not drive the bar (faded)", function()
+      assert.is_true(Core.NameDrops(true, false, nil, nil))
+      assert.is_true(Core.NameDrops(true, false, nil, true))
+    end)
+  end)
+
   describe("HealthCurve and HealthAlpha", function()
     -- poison is a value that raises an error on any read (arithmetic, comparison, concatenation,
     -- indexing, calling, tostring), as a secret value in game.
@@ -1875,6 +1924,8 @@ describe("Core.BarOffsets", function()
 
   it("gives Blizzard's layout back at factor 1", function()
     assert.are.same({ 0, 0, 2 }, { Core.BarOffsets(200, 2, 1, 1) })
+    -- The width is not needed then.
+    assert.are.same({ 0, 0, 2 }, { Core.BarOffsets(nil, 2, 1, 1) })
   end)
 
   it("refuses invalid input", function()
