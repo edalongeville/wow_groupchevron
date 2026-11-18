@@ -2781,8 +2781,15 @@ local function LearnFromNPC(kind)
     return
   end
   local id = Core.NpcID(Try(UnitGUID, "npc"))
-  local canRepair = kind == "merchant" and Try(CanMerchantRepair) == true
-  if Core.LearnRole(db.npcroles, id, Core.InteractionRole(kind, canRepair)) then
+  -- A merchant who repairs, a trainer who teaches a profession (unverified on the Forever client:
+  -- without the function, every trainer counts as a class trainer).
+  local more = false
+  if kind == "merchant" then
+    more = Try(CanMerchantRepair) == true
+  elseif kind == "trainer" then
+    more = Try(IsTradeskillTrainer) == true
+  end
+  if Core.LearnRole(db.npcroles, id, Core.InteractionRole(kind, more)) then
     ScheduleFriendRefresh()
   end
 end

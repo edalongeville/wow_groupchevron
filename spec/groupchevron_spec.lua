@@ -3230,6 +3230,7 @@ describe("GroupChevron", function()
           end,
         },
         CanMerchantRepair = function() return npc.repair end,
+        IsTradeskillTrainer = function() return npc.tradeskill end,
         InCombatLockdown = function() return npc.combat == true end,
         C_CVar = {
           GetCVar = function(name)
@@ -3249,7 +3250,8 @@ describe("GroupChevron", function()
         C_Texture = {
           GetAtlasInfo = function(name)
             local known = { FlightMaster = true, flightmaster = true, innkeeper = true, banker = true,
-              auctioneer = true, stablemaster = true, class = true, repair = true, food = true }
+              auctioneer = true, stablemaster = true, class = true, profession = true, repair = true,
+              ["levelup-icon-bag"] = true }
             return known[name] and { width = 32 } or nil
           end,
         },
@@ -3336,7 +3338,7 @@ describe("GroupChevron", function()
       assert.is_nil(env.GroupChevronDB.roleicons.flight)
       assert.are.equal("flightmaster", frame.tex.atlas)
       env.slash("icon")
-      assert.is_true(printedContains(env, "icon vendor: food"))
+      assert.is_true(printedContains(env, "icon vendor: levelup-icon-bag"))
       assert.is_false(printedContains(env, "error in"))
     end)
 
@@ -3419,7 +3421,7 @@ describe("GroupChevron", function()
       env.runTimers()
       local frame, texture = icon(env, plate)
       assert.is_true(frame.shown)
-      assert.are.equal("food", texture)
+      assert.are.equal("levelup-icon-bag", texture)
       -- The same merchant can repair: the better role wins.
       npc.repair = true
       env.fire("PLAYER_INTERACTION_MANAGER_FRAME_SHOW", 5)
@@ -3430,6 +3432,22 @@ describe("GroupChevron", function()
       env.fire("PLAYER_INTERACTION_MANAGER_FRAME_SHOW", 6)
       assert.are.equal("flight", env.GroupChevronDB.npcroles[352])
       -- An unknown window teaches nothing.
+      env.fire("PLAYER_INTERACTION_MANAGER_FRAME_SHOW", 99)
+      assert.are.equal("flight", env.GroupChevronDB.npcroles[352])
+      -- Trainers: a profession trainer and a class trainer are two roles.
+      env.GroupChevronDB.npcroles[352] = nil
+      npc.tradeskill = true
+      env.fire("TRAINER_SHOW")
+      env.runTimers()
+      assert.are.equal("profession", env.GroupChevronDB.npcroles[352])
+      assert.are.equal("profession", select(2, icon(env, plate)))
+      env.GroupChevronDB.npcroles[352] = nil
+      npc.tradeskill = false
+      env.fire("TRAINER_SHOW")
+      env.runTimers()
+      assert.are.equal("trainer", env.GroupChevronDB.npcroles[352])
+      assert.are.equal("class", select(2, icon(env, plate)))
+      env.GroupChevronDB.npcroles[352] = "flight"
       env.fire("PLAYER_INTERACTION_MANAGER_FRAME_SHOW", 99)
       assert.are.equal("flight", env.GroupChevronDB.npcroles[352])
       assert.is_false(printedContains(env, "error in"))

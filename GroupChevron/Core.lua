@@ -802,7 +802,8 @@ end
 -- innkeeper who also sells food shows the innkeeper icon, a vendor who repairs the repair one),
 -- with the default icon of each: an atlas of the client's map / minimap point-of-interest icons
 -- (32 x 32, all in atlas 647, FileDataID 1121272), names checked in UiTextureAtlasMember for the
--- Forever build 1.60.1.70959 (wago.tools). There is no generic merchant atlas: vendors get "food".
+-- Forever build 1.60.1.70959 (wago.tools). Class and profession trainers are two roles (two
+-- icons); vendors get the bag of the level-up screen ("levelup-icon-bag", the player's choice).
 -- The player can pick another icon per role (/gchev icon); a missing atlas shows no icon. The
 -- first builds used the minimap tracking textures (too low-res once enlarged), then 64 x 64
 -- Interface\Icons spell and item icons (the wrong pictures).
@@ -812,9 +813,10 @@ Core.ROLES = {
   { key = "banker", icon = "banker" },
   { key = "auctioneer", icon = "auctioneer" },
   { key = "stable", icon = "stablemaster" },
+  { key = "profession", icon = "profession" },
   { key = "trainer", icon = "class" },
   { key = "repair", icon = "repair" },
-  { key = "vendor", icon = "food" },
+  { key = "vendor", icon = "levelup-icon-bag" },
 }
 
 -- ICON_CROP is the part of an Interface\Icons texture kept (SetTexCoord left, right, top,
@@ -885,6 +887,10 @@ Core.SUBTITLES = {
     { "banker", { "banker" } },
     { "auctioneer", { "auctioneer" } },
     { "stable", { "stable master" } },
+    -- "<Profession> Trainer" before any other trainer ("Tailoring Supplies" is a vendor).
+    { "profession", { "alchemy trainer", "blacksmithing trainer", "enchanting trainer", "engineering trainer",
+      "herbalism trainer", "leatherworking trainer", "mining trainer", "skinning trainer", "tailoring trainer",
+      "first aid trainer", "fishing trainer", "cooking trainer" } },
     { "trainer", { "trainer" } },
     { "repair", { "armorer", "weaponsmith", "repair" } },
     { "vendor", { "vendor", "merchant", "supplies", "goods", "food & drink", "reagents", "provisioner",
@@ -978,17 +984,22 @@ function Core.CleanRoles(roles)
 end
 
 -- INTERACTIONS maps the windows an NPC opens (the interaction kinds the glue listens for) to the
--- role they show; "merchant" is "repair" when the merchant can repair (InteractionRole).
+-- role they show; "merchant" is "repair" when the merchant can repair, "trainer" is "profession"
+-- when the trainer teaches a profession (InteractionRole).
 Core.INTERACTIONS = {
   merchant = "vendor", taxi = "flight", banker = "banker", auctioneer = "auctioneer", trainer = "trainer",
   stable = "stable", binder = "innkeeper",
 }
 
--- InteractionRole returns the role an interaction of kind (see INTERACTIONS) shows, or nil.
-function Core.InteractionRole(kind, canRepair)
+-- InteractionRole returns the role an interaction of kind (see INTERACTIONS) shows, or nil. more
+-- is true when the merchant can repair (kind "merchant": CanMerchantRepair) or the trainer
+-- teaches a profession (kind "trainer": IsTradeskillTrainer).
+function Core.InteractionRole(kind, more)
   local role = type(kind) == "string" and Core.INTERACTIONS[kind] or nil
-  if role == "vendor" and canRepair == true then
+  if role == "vendor" and more == true then
     return "repair"
+  elseif role == "trainer" and more == true then
+    return "profession"
   end
   return role
 end

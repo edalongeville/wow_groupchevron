@@ -60,6 +60,7 @@ read_globals = {
   "IsAddOnLoaded",
   "IsInGuild",
   "IsPlayerInGuildFromGUID",
+  "IsTradeskillTrainer",
   "NUM_CHAT_WINDOWS",
   "RAID_CLASS_COLORS",
   "RequestTimePlayed",
