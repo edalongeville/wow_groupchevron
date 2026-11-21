@@ -1,3 +1,4 @@
+- **Friendly NPC icon shifted left (0.24.0):** the role icon sits one icon width left of the name's centre (`ICON_SHIFT`), so it no longer covers the game's quest markers ("!", "?") drawn above the NPC's head. Not yet checked in game.
 # GroupChevron: implementation notes
 
 Details for contributors. User-facing documentation is in the [README](../README.md). The version in parentheses is the addon version that introduced or last changed the item.
