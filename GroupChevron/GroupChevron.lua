@@ -586,6 +586,13 @@ end
 
 local ICON_SIZE = 6
 
+-- ICON_SHIFT moves the icon left of the name's centre, in icon widths: the game draws its quest
+-- markers ("!", "?") in the world, centred above the NPC's head, right where an icon centred
+-- above the name would be. Shifted by one width, the icon's right edge is half a width left of
+-- the centre, so it sits next to the marker. The marker is scaled with the camera distance and
+-- the icon is not: a very close camera can still bring them together.
+local ICON_SHIFT = 1
+
 -- GetIcon returns the plate's role icon frame, creating it on first use (nil without CreateFrame).
 local function GetIcon(plate, uf)
   local frame = icons[plate]
@@ -645,7 +652,8 @@ local function SetIconTexture(tex, name)
   return ok and loaded ~= false
 end
 
--- ShowIcon shows role's icon on the plate, its bottom GAP above anchor (else above uf). It returns
+-- ShowIcon shows role's icon on the plate, its bottom GAP above anchor (else above uf), shifted
+-- ICON_SHIFT icon widths to the left (next to the game's quest marker). It returns
 -- false (and hides the icon) when the role has no icon or the client cannot load its texture.
 local function ShowIcon(plate, uf, anchor, role)
   local path = IconName(role)
@@ -666,7 +674,7 @@ local function ShowIcon(plate, uf, anchor, role)
   local size = ICON_SIZE * Factor("npciconsize")
   frame:SetSize(size, size)
   frame:ClearAllPoints()
-  frame:SetPoint("BOTTOM", anchor or uf, "TOP", 0, GAP)
+  frame:SetPoint("BOTTOM", anchor or uf, "TOP", -size * ICON_SHIFT, GAP)
   frame.role = role
   frame:Show()
   return true

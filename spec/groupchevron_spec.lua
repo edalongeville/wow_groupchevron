@@ -3480,6 +3480,8 @@ describe("GroupChevron", function()
       assert.are.equal(sub, label.points[1][2])
       assert.are.equal("TOP", label.points[1][3])
       assert.are.equal(label, icon(env, plate).points[1][2])
+      -- Shifted one icon width (6 x the default npciconsize 5) to the left, off the quest marker.
+      assert.are.same({ "BOTTOM", label, "TOP", -30, 2 }, icon(env, plate).points[1])
       assert.are.equal(label.color[1], sub.color[1])
       -- Hurt: the bar shows and the level stays.
       env.world.health.nameplate5 = { 50, 100 }
