@@ -1102,6 +1102,45 @@ describe("GroupChevron", function()
         end
       end)
 
+      it("swaps a compact NPC's two name copies with the curves' alphas, never reading them", function()
+        local s = {}
+        local env, plate = setup(s)
+        -- The friend on nameplate2 becomes a friendly NPC with compact plates, hurt 40 / 100.
+        env.slash("npccompact on")
+        env.world.players.nameplate2 = false
+        env.fire("NAME_PLATE_UNIT_ADDED", "nameplate2")
+        local uf = plate.UnitFrame
+        local high, holder = env.label(plate)
+        local low
+        for _, l in ipairs(holder.labels) do
+          if l.points[1] and l.points[1][2] == uf.HealthBarsContainer then
+            low = l
+          end
+        end
+        assert.is_truthy(low)
+        assert.are.equal(high.text, low.text)
+        local function num(a)
+          if secrets[a] ~= nil then
+            return secrets[a]
+          end
+          return a
+        end
+        -- Hurt: the high copy gets the bar's alpha (1), the low one the opposite curve's (0).
+        assert.are.same({ 1, 0 }, { num(high.alpha), num(low.alpha) })
+        assert.is_true(secrets[high.alpha] ~= nil)
+        -- Healed: swapped on the health event.
+        env.world.health.nameplate2 = { 100, 100 }
+        env.fire("UNIT_HEALTH", "nameplate2")
+        assert.are.same({ 0, 1 }, { num(high.alpha), num(low.alpha) })
+        -- The curve fails: the plate is compacted again without it, health unknown, so the bar is
+        -- faded and the name stays in its place.
+        s.fail = true
+        env.fire("UNIT_HEALTH", "nameplate2")
+        assert.are.equal(0, uf.HealthBarsContainer.alpha)
+        assert.are.same({ 0, 1 }, { num(high.alpha), num(low.alpha) })
+        assert.is_false(printedContains(env, "error in"))
+      end)
+
       it("drops a compact plate's level while the curve shows the bar, and keeps it in doubt", function()
         local s = {}
         local env, plate = setup(s)
@@ -3377,10 +3416,12 @@ describe("GroupChevron", function()
       local label = env.label(plate)
       assert.are.equal(label, frame.points[1][2])
       assert.are.equal("#1AFF1A", hex(label.color))
-      -- Name only (npccompact): the health bar and cast bar are faded, the icon is kept.
+      -- Name only (npccompact): the health bar and cast bar are faded, the icon is kept; at full
+      -- health the name and icon shown are the low copy, in the faded bar's place.
       assert.are.equal(0, uf.HealthBarsContainer.alpha)
       assert.are.equal(0, uf.castBar.alpha)
-      assert.is_nil(frame.alpha)
+      assert.are.equal(0, frame.alpha)
+      assert.are.equal(0, label.alpha)
       assert.is_false(printedContains(env, "error in"))
     end)
 
@@ -3470,9 +3511,15 @@ describe("GroupChevron", function()
       local uf = plate.UnitFrame
       local label, holder = env.label(plate)
       assert.are.equal("Farbatosz Marokbar (55)", label.text)
-      -- The subtitle: the last FontString of our frame, where Blizzard's name was (+ npcnamegap),
-      -- our name right above it, the icon above our name.
-      local sub = holder.labels[#holder.labels]
+      -- The subtitle: the FontString of our frame where Blizzard's name was (+ npcnamegap), our
+      -- name right above it, the icon above our name (the copy above the bar; see the low copy's
+      -- spec below).
+      local sub
+      for _, l in ipairs(holder.labels) do
+        if l.points[1] and l.points[1][2] == uf.name then
+          sub = l
+        end
+      end
       assert.are.equal("<Maître des gryphons>", sub.text)
       assert.is_true(sub.shown)
       assert.are.equal(uf.name, sub.points[1][2])
@@ -3486,6 +3533,73 @@ describe("GroupChevron", function()
       env.fire("UNIT_HEALTH", "nameplate5")
       assert.are.equal("Farbatosz Marokbar (55)", label.text)
       assert.are.equal(1, label.alpha)
+    end)
+
+    -- lowCopy returns the low copy of a compact NPC plate's name and subtitle (the FontStrings
+    -- anchored on the health bar, or on the low subtitle) and the low icon frame, if any.
+    local function lowCopy(env, plate)
+      local uf = plate.UnitFrame
+      local _, holder = env.label(plate)
+      local name, sub
+      for _, l in ipairs(holder.labels) do
+        if l.points[1] and l.points[1][2] == uf.HealthBarsContainer then
+          sub = l
+        end
+      end
+      local base = sub
+      for _, l in ipairs(holder.labels) do
+        if l.points[1] and l.points[1][2] == base and l ~= base then
+          name = l
+        end
+      end
+      if not name and sub and not sub.text:match("^<") then
+        name, sub = sub, nil
+      end
+      local lowIcon
+      for _, f in ipairs(env.frames) do
+        if f.parent == uf and f.tex and f.points[1] and f.points[1][2] == name then
+          lowIcon = f
+        end
+      end
+      return name, sub, lowIcon
+    end
+
+    it("puts a compact NPC's name in the faded health bar's place, and above the bar while hurt", function()
+      local env = load(npcClient({ subtitle = "Gryphon Master" }, { npcnamegap = -4 }))
+      local plate = newTreePlate("nameplate5")
+      env.world.levels.nameplate5 = 30
+      showNPC(env, plate)
+      local high = env.label(plate)
+      local highIcon = icon(env, plate)
+      local name, sub, lowIcon = lowCopy(env, plate)
+      -- The low copy: same texts and colour, the subtitle's bottom on the bar's (+ npcnamegap).
+      assert.are.equal("Farbatosz Marokbar (30)", name.text)
+      assert.are.equal("<Gryphon Master>", sub.text)
+      assert.are.equal("BOTTOM", sub.points[1][3])
+      assert.are.equal(-4, sub.points[1][5])
+      assert.are.equal("TOP", name.points[1][3])
+      assert.are.equal(hex(high.color), hex(name.color))
+      assert.are.equal("flightmaster", lowIcon.tex.atlas)
+      -- Full health (no health curve on this client): the low copy shows, the high one is faded.
+      assert.are.same({ 1, 1, 1 }, { name.alpha, sub.alpha, lowIcon.alpha })
+      assert.are.same({ 0, 0 }, { high.alpha, highIcon.alpha })
+      -- Hurt: the bar shows, so the name goes back above it.
+      env.world.health.nameplate5 = { 50, 100 }
+      env.fire("UNIT_HEALTH", "nameplate5")
+      assert.are.same({ 0, 0, 0 }, { name.alpha, sub.alpha, lowIcon.alpha })
+      assert.are.same({ 1, 1 }, { high.alpha, highIcon.alpha })
+      -- Healed: low again.
+      env.world.health.nameplate5 = { 100, 100 }
+      env.fire("UNIT_HEALTH", "nameplate5")
+      assert.are.equal(1, name.alpha)
+      assert.are.equal(0, high.alpha)
+      -- npccompact off: full plate, the low copy hidden, the name above the bar.
+      env.slash("npccompact off")
+      assert.is_false(name.shown)
+      assert.are.equal(0, name.alpha)
+      assert.are.equal(1, high.alpha)
+      assert.is_false(lowIcon.shown)
+      assert.is_false(printedContains(env, "error in"))
     end)
 
     it("takes the game's reaction colour for the name, and gives Blizzard's back afterwards", function()
