@@ -3213,16 +3213,16 @@ local function SlashStatus()
   Print(string.format("class colour %s (other friendly players' names), %d plate(s) coloured",
     Flag("classcolor") and "on" or "off", classes))
   Print("/gchev on | off | color #RRGGBB | chevsize 1-5 | textsize 1-3 | barsize 1-3 | buffsize 1-3"
-    .. " | namegap -10-40 | friendcolor #RRGGBB | friendchevron on|off | bnetfriends on|off"
+    .. " | namegap -40-40 | friendcolor #RRGGBB | friendchevron on|off | bnetfriends on|off"
     .. " | guildcolor #RRGGBB | guildchevron on|off"
     .. " | friendchevsize 1-5 | guildchevsize 1-5 | friendsize 1-3 | guildsize 1-3 | hostilecolor #RRGGBB"
     .. " | hostilechevsize 1-5"
-    .. " | hostilesize 1-3 | hostilenamegap -10-40"
+    .. " | hostilesize 1-3 | hostilenamegap -40-40"
     .. " | memberoutlinesize|friendoutlinesize|guildoutlinesize|hostileoutlinesize 0-5"
-    .. " | othersize 1-3 | otherbarsize 1-3 | othernamegap -10-40 | level on|off | compact on|off | classcolor on|off"
+    .. " | othersize 1-3 | otherbarsize 1-3 | othernamegap -40-40 | level on|off | compact on|off | classcolor on|off"
     .. " | font default|outline|chat|large|game13"
     .. " | npcplates on|off | softinteract on|off | npcicons on|off | npccompact on|off | npcsize 1-3"
-    .. " | npcnamegap -10-40 | npciconsize 1-15"
+    .. " | npcnamegap -40-40 | npciconsize 1-15"
     .. " | icon [<role> <texture or atlas>|default]"
     .. " | reset | options | debug")
 end

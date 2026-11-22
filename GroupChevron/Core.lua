@@ -159,7 +159,7 @@ end
 -- text size): "namegap" for group members, "othernamegap" for other friendly players (compact
 -- or not, the target included, like othersize), "hostilenamegap" for the hostiles tied to a
 -- quest. 0 is the layout without a gap (NO_GAP); the default of every kind is DEFAULT_GAP.
-Core.MIN_GAP = -10
+Core.MIN_GAP = -40
 Core.MAX_GAP = 40
 Core.NO_GAP = 0
 Core.DEFAULT_GAP = 5
