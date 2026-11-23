@@ -91,7 +91,7 @@ end
 Core.MIN_FACTOR = 1
 -- The outline thicknesses (memberoutlinesize, friendoutlinesize, guildoutlinesize, hostileoutlinesize)
 -- start at 0: no outline. npciconalpha is the role icon's opacity: 0.1 (faint, never invisible) to 1
--- (opaque, the default).
+-- (opaque); default 0.8.
 Core.MIN_FACTORS = { memberoutlinesize = 0, friendoutlinesize = 0, guildoutlinesize = 0, hostileoutlinesize = 0,
   npciconalpha = 0.1 }
 Core.DEFAULT_MAX_FACTOR = 3
@@ -107,7 +107,8 @@ Core.DEFAULT_FACTOR = 1
 Core.DEFAULT_FACTORS = { chevsize = 3, textsize = 1.75, buffsize = 1.1, othersize = 1.5, hostilesize = 1.5,
   friendsize = 1.75, guildsize = 1.75, hostilechevsize = 3,
   friendchevsize = 3, guildchevsize = 3, memberoutlinesize = 2,
-  friendoutlinesize = 2, guildoutlinesize = 2, hostileoutlinesize = 2, npciconsize = 5 }
+  friendoutlinesize = 2, guildoutlinesize = 2, hostileoutlinesize = 2, npciconsize = 5,
+  npciconalpha = 0.8 }
 
 -- DefaultFactor is the default of a factor kind: its DEFAULT_FACTORS entry, else DEFAULT_FACTOR.
 function Core.DefaultFactor(kind)
