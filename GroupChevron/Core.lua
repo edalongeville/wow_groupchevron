@@ -1320,6 +1320,18 @@ function Core.ObjectiveOpen(api, line)
   return done ~= nil and total ~= nil and done < total
 end
 
+-- IsSelfName tells whether a QuestPlayer line's name (leftText) is the player's: the tooltip
+-- writes the full name ("Brom Boutefeu", with the last name WoW: Forever characters have) while
+-- UnitName("player") gives the first name only ("Brom"), so the name counts when it is selfName or
+-- starts with selfName and a space. Forever names are unique, so another player's full name never
+-- starts with the player's first name and a space.
+function Core.IsSelfName(name, selfName)
+  if type(name) ~= "string" or type(selfName) ~= "string" or selfName == "" then
+    return false
+  end
+  return name == selfName or name:sub(1, #selfName + 1) == selfName .. " "
+end
+
 -- PartyQuestLookup tells whether unit is tied to an objective a party member still has to do,
 -- read from the unit's tooltip data (api.GetTooltipUnit(unit), i.e. C_TooltipInfo.GetUnit: the
 -- same lines the game shows on the mouseover tooltip). Its lines are walked in order with the
@@ -1375,7 +1387,7 @@ function Core.PartyQuestLookup(api, unit)
         local name = read(api, line, "leftText")
         if type(name) ~= "string" or name == "" then
           owner = false
-        elseif name == selfName then
+        elseif Core.IsSelfName(name, selfName) then
           owner = nil
         else
           owner = name
@@ -1386,6 +1398,188 @@ function Core.PartyQuestLookup(api, unit)
     end
   end
   return false, "none"
+end
+
+-- StripCount returns an objective text without its "n/m" counts, spaces squeezed and trimmed, so
+-- that a tooltip line and a quest log entry whose counts are a step apart still match.
+function Core.StripCount(text)
+  if type(text) ~= "string" then
+    return nil
+  end
+  local s = text:gsub("%d+%s*/%s*%d+", ""):gsub("%s+", " "):gsub("^ ", ""):gsub(" $", "")
+  return s
+end
+
+-- ObjectiveType returns the type ("monster", "item", "object", ...) of the objective of a quest
+-- that a tooltip objective line's text stands for. objectives is
+-- C_QuestLog.GetQuestObjectives(questID): a list of { text, type, finished }. The texts are
+-- compared as they are (the tooltip and the quest log are written by the same client, in its own
+-- language: no word of any language is looked for), then without their "n/m" counts; failing
+-- both, the type shared by every unfinished objective of the quest, if they all share one. nil:
+-- unknown (no objectives, a secret value, or no match).
+function Core.ObjectiveType(api, objectives, text)
+  if type(objectives) ~= "table" or type(text) ~= "string" then
+    return nil
+  end
+  local list = {}
+  for i = 1, 50 do
+    local o = read(api, objectives, i)
+    if o == nil then
+      break
+    end
+    local kind, otext = read(api, o, "type"), read(api, o, "text")
+    if type(kind) == "string" then
+      list[#list + 1] = { kind = kind, text = type(otext) == "string" and otext or nil,
+        finished = read(api, o, "finished") == true }
+    end
+  end
+  for _, o in ipairs(list) do
+    if o.text == text then
+      return o.kind
+    end
+  end
+  local bare = Core.StripCount(text)
+  if bare and bare ~= "" then
+    for _, o in ipairs(list) do
+      if o.text and Core.StripCount(o.text) == bare then
+        return o.kind
+      end
+    end
+  end
+  local only
+  for _, o in ipairs(list) do
+    if not o.finished then
+      if only == nil then
+        only = o.kind
+      elseif only ~= o.kind then
+        return nil
+      end
+    end
+  end
+  return only
+end
+
+-- GuessKind guesses the type of an objective that the player's quest log cannot type (a party
+-- member's quest the player does not have: C_QuestLog.GetQuestObjectives needs the quest in the
+-- log): a kill objective names the creature (the client writes "<unit name>: n/m" or "<unit name>
+-- slain: n/m" in its own language), so an objective text holding the unit's name, as the tooltip
+-- shows it, is a kill ("monster"), and any other one names an item to loot ("item"). No word of any
+-- language is looked for. nil when the text or the name cannot be read.
+function Core.GuessKind(text, unitName)
+  local bare = Core.StripCount(text)
+  if not bare or bare == "" or type(unitName) ~= "string" or unitName == "" then
+    return nil
+  end
+  if bare:lower():find(unitName:lower(), 1, true) then
+    return "monster"
+  end
+  return "item"
+end
+
+-- QuestKindLookup tells what is left to do to unit, for the player's own quests and for their
+-- party members': kill it (an open "monster" objective) and / or loot a quest item from it (an
+-- open "item" objective). From the unit's tooltip data (api.GetTooltipUnit, the mouseover
+-- tooltip's lines, as PartyQuestLookup): a QuestTitle line carries the quest's ID (its id field)
+-- and starts the player's own objectives, a QuestPlayer line naming someone else starts that
+-- party member's, the player's own name (which the client lists in a group) the player's again,
+-- an unreadable name nobody's (skipped). Each open QuestObjective line (ObjectiveOpen) gets its type
+-- from ObjectiveType with api.GetQuestObjectives(questID): the player's quest log, which also
+-- knows a party member's quest the player has too (their counts differ: ObjectiveType then
+-- matches the text without them); other types (object, event, log...) count as neither. An
+-- objective the log cannot type (a party member's quest the player does not have) is guessed from
+-- its text and the unit's name (GuessKind; the name from the tooltip's UnitName line, else
+-- api.UnitName(unit)). It returns kill, loot (the player's own), the source ("tooltip": at least
+-- one kind typed by the quest log; "guessed": kinds found, none of them typed by the log; "none":
+-- nothing, also when an API raises an error or returns a secret value; "missing": an API or a line
+-- type does not exist on this client), partyKill, partyLoot and mineOpen (true when the tooltip
+-- lists at least one open objective of the player's own, typed or not: the unit is then tied to
+-- one of the player's quests, even when UnitIsRelatedToActiveQuest says no).
+function Core.QuestKindLookup(api, unit)
+  if type(api) ~= "table" or type(api.GetTooltipUnit) ~= "function"
+    or type(api.GetQuestObjectives) ~= "function" then
+    return false, false, "missing", false, false, false
+  end
+  local types = api.TooltipLineTypes
+  local tTitle = read(api, types, "QuestTitle")
+  local tPlayer = read(api, types, "QuestPlayer")
+  local tObjective = read(api, types, "QuestObjective")
+  if tTitle == nil or tObjective == nil then
+    return false, false, "missing", false, false, false
+  end
+  if type(unit) ~= "string" or unit == "" or isSecret(api, unit) then
+    return false, false, "none", false, false, false
+  end
+  local lines = read(api, call(api, "GetTooltipUnit", unit), "lines")
+  if type(lines) ~= "table" then
+    return false, false, "none", false, false, false
+  end
+  local selfName = call(api, "UnitName", "player")
+  if type(selfName) ~= "string" then
+    selfName = nil
+  end
+  -- The unit's name, for GuessKind: the tooltip's UnitName line, else UnitName(unit).
+  local tName = read(api, types, "UnitName")
+  local unitName
+  -- found.self / found.party: the kinds found for the player and for party members; logged: at
+  -- least one of them typed by the quest log.
+  local found = { self = {}, party = {} }
+  local logged, mineOpen = false, false
+  -- quest: the current quest's ID (nil: none or unreadable); owner: whose objectives the lines
+  -- are ("self", "party", or nil: nobody's).
+  local quest, owner = nil, nil
+  local objectives = {}
+  for i = 1, 200 do
+    local line = read(api, lines, i)
+    if line == nil then
+      break
+    end
+    local kind = read(api, line, "type")
+    if kind ~= nil then
+      if tName ~= nil and kind == tName and unitName == nil then
+        local name = read(api, line, "leftText")
+        unitName = type(name) == "string" and name or nil
+      elseif kind == tTitle then
+        local id = read(api, line, "id")
+        quest, owner = type(id) == "number" and id or nil, "self"
+      elseif tPlayer ~= nil and kind == tPlayer then
+        local name = read(api, line, "leftText")
+        if type(name) ~= "string" or name == "" then
+          owner = nil
+        elseif Core.IsSelfName(name, selfName) then
+          owner = "self"
+        else
+          owner = "party"
+        end
+      elseif kind == tObjective and owner and quest and Core.ObjectiveOpen(api, line) then
+        if owner == "self" then
+          mineOpen = true
+        end
+        if objectives[quest] == nil then
+          objectives[quest] = call(api, "GetQuestObjectives", quest) or false
+        end
+        local text = read(api, line, "leftText")
+        local t = Core.ObjectiveType(api, objectives[quest], text)
+        if t ~= nil then
+          logged = true
+        else
+          if unitName == nil then
+            local name = call(api, "UnitName", unit)
+            unitName = type(name) == "string" and name or false
+          end
+          t = Core.GuessKind(text, unitName or nil)
+        end
+        if t == "monster" then
+          found[owner].kill = true
+        elseif t == "item" then
+          found[owner].loot = true
+        end
+      end
+    end
+  end
+  local mine, party = found.self, found.party
+  local any = mine.kill or mine.loot or party.kill or party.loot
+  local source = (any and logged and "tooltip") or (any and "guessed") or "none"
+  return mine.kill == true, mine.loot == true, source, party.kill == true, party.loot == true, mineOpen
 end
 
 -- readRGB returns the r, g, b (numbers in 0..1, none secret) of a class colour c: a ColorMixin
@@ -1449,7 +1643,10 @@ end
 -- neutral units alike) and target (UnitIsUnit(unit, "target")) is true, false or nil (unknown:
 -- missing function, error or secret value). quest is true only for an attackable unit that
 -- QuestLookup says is tied to an active quest, and questSource is its source ("skipped" when the
--- unit is not known to be attackable: the quest API is then not asked). partyQuest is true only
+-- unit is not known to be attackable: the quest API is then not asked); for such a unit, questKill,
+-- questLoot, questKindSource, partyKill and partyLoot are QuestKindLookup's answer (asked for every
+-- attackable unit), and an open objective of the player's own in its tooltip also makes quest true
+-- (questSource "tooltip"), as UnitIsRelatedToActiveQuest does not cover every quest. partyQuest is true only
 -- for an attackable unit not tied to the player's own quests that PartyQuestLookup says is tied to
 -- a party member's open objective, and partyQuestSource is its source ("skipped" when the unit is
 -- not known to be attackable or is tied to the player's own quests). listed is true only when FriendLookup says
@@ -1485,6 +1682,14 @@ function Core.UnitInfo(api, unit, settings)
   end
   if info.attackable == true then
     info.quest, info.questSource = Core.QuestLookup(api, unit)
+    local mineOpen
+    info.questKill, info.questLoot, info.questKindSource, info.partyKill, info.partyLoot, mineOpen =
+      Core.QuestKindLookup(api, unit)
+    -- UnitIsRelatedToActiveQuest said no to a mob whose tooltip lists an open objective of the
+    -- player's (seen in game on WoW: Forever for an item to loot from it): the tooltip wins.
+    if info.quest ~= true and mineOpen == true then
+      info.quest, info.questSource = true, "tooltip"
+    end
     if info.quest ~= true then
       info.partyQuest, info.partyQuestSource = Core.PartyQuestLookup(api, unit)
     end

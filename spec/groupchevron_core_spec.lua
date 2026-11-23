@@ -550,7 +550,7 @@ describe("GroupChevron Core", function()
   end)
 
   describe("hostiles tied to a party member's quest", function()
-    local TYPES = { QuestObjective = 8, QuestTitle = 17, QuestPlayer = 18 }
+    local TYPES = { UnitName = 2, QuestObjective = 8, QuestTitle = 17, QuestPlayer = 18 }
     -- tooltipAPI answers GetTooltipUnit with { lines = lines } for every unit; the player is "Me".
     local function tooltipAPI(lines, overrides)
       local api = {
@@ -583,6 +583,158 @@ describe("GroupChevron Core", function()
       assert.are.same({ 1, 1, 1 }, db.partyquestcolor)
       assert.are.equal(3, db.partyquestchevsize)
       assert.are.equal(5, db.partyquestnamegap)
+    end)
+
+    it("ObjectiveType links a tooltip line to its quest log objective, whatever the language", function()
+      local api = tooltipAPI({})
+      local objectives = {
+        { text = "Croc de goule : 0/10", type = "item", finished = false },
+        { text = "Démon squelette : 13/15 personnages tués", type = "monster", finished = false },
+      }
+      -- The same text: its type.
+      assert.are.equal("monster", Core.ObjectiveType(api, objectives, "Démon squelette : 13/15 personnages tués"))
+      -- Counts a step apart (the log updated first): the text without its counts.
+      assert.are.equal("item", Core.ObjectiveType(api, objectives, "Croc de goule : 1/10"))
+      assert.are.equal("Croc de goule :", Core.StripCount("Croc de goule : 1/10"))
+      -- No match, two types left: unknown; one type left: that one.
+      assert.is_nil(Core.ObjectiveType(api, objectives, "Something else 0/1"))
+      objectives[2].finished = true
+      assert.are.equal("item", Core.ObjectiveType(api, objectives, "Something else 0/1"))
+      -- Nothing to read.
+      assert.is_nil(Core.ObjectiveType(api, nil, "x"))
+      assert.is_nil(Core.ObjectiveType(api, objectives, SECRET))
+      assert.is_nil(Core.ObjectiveType(api, { { text = "a", type = SECRET } }, "a"))
+    end)
+
+    it("QuestKindLookup reads the open objectives: the player's own and the party's, kill and loot", function()
+      -- What the Forever client gave for a mob tied to three of the player's quests, in a group:
+      -- the player's own name, then a party member's, under the first quest.
+      local lines = {
+        { type = 2, leftText = "Démon squelette" },
+        { type = 17, leftText = "Les Veilleurs", id = 57 }, who("Me"),
+        objective("Démon squelette : 13/15 personnages tués"), who("Gonald"),
+        objective("Démon squelette : 15/15 personnages tués"),
+        { type = 17, leftText = "Le Totem d'affliction", id = 101 }, who("Me"), objective("Doigt de squelette : 10/10"),
+        { type = 17, leftText = "Bouclier de Grant", id = 79362 }, who("Me"), objective("Masse de Grant : 1/1"),
+      }
+      local log = {
+        [57] = { { text = "Démon squelette : 13/15 personnages tués", type = "monster", finished = false } },
+        [101] = { { text = "Doigt de squelette : 10/10", type = "item", finished = true } },
+        [79362] = { { text = "Masse de Grant : 1/1", type = "item", finished = true } },
+      }
+      local asked = 0
+      local function objectivesOf(id)
+        asked = asked + 1
+        return log[id]
+      end
+      local api = tooltipAPI(lines, { GetQuestObjectives = objectivesOf })
+      -- The item objectives are done, the party member's kill one too: the player's kill only.
+      assert.are.same({ true, false, "tooltip", false, false, true }, { Core.QuestKindLookup(api, "nameplate1") })
+      assert.are.equal(1, asked) -- only the quest with an open objective is looked up
+      -- One of them open again: kill and loot.
+      lines[9] = objective("Doigt de squelette : 4/10")
+      log[101][1] = { text = "Doigt de squelette : 4/10", type = "item", finished = false }
+      assert.are.same({ true, true, "tooltip", false, false, true }, { Core.QuestKindLookup(api, "nameplate1") })
+      -- The party member still has kills to do on the same quest (counts differ from the player's:
+      -- matched without them): a party kill.
+      lines[6] = objective("Démon squelette : 9/15 personnages tués")
+      assert.are.same({ true, true, "tooltip", true, false, true }, { Core.QuestKindLookup(api, "nameplate1") })
+      -- A party member's open objective alone: party only, never the player's.
+      api = tooltipAPI({ { type = 17, leftText = "Q", id = 5 }, who("Gonald"), objective("Crate: 0/4") },
+        { GetQuestObjectives = function() return { { text = "Crate: 2/4", type = "item" } } end })
+      assert.are.same({ false, false, "tooltip", false, true, false }, { Core.QuestKindLookup(api, "nameplate1") })
+      -- An unreadable player name: nobody's.
+      api = tooltipAPI({ { type = 17, leftText = "Q", id = 5 }, who(SECRET), objective("Crate: 0/4") },
+        { GetQuestObjectives = function() return { { text = "Crate: 0/4", type = "item" } } end })
+      assert.are.same({ false, false, "none", false, false, false }, { Core.QuestKindLookup(api, "nameplate1") })
+      -- Other objective types count as neither.
+      api = tooltipAPI({ { type = 17, leftText = "Q", id = 5 }, objective("Plan détruit : 0/1") },
+        { GetQuestObjectives = function() return { { text = "Plan détruit : 0/1", type = "object" } } end })
+      assert.are.same({ false, false, "none", false, false, true }, { Core.QuestKindLookup(api, "nameplate1") })
+      -- A secret or missing quest ID: nothing is looked up.
+      api = tooltipAPI({ { type = 17, leftText = "Q", id = SECRET }, objective("Crate: 0/4") },
+        { GetQuestObjectives = function() error("never asked") end })
+      assert.are.same({ false, false, "none", false, false, false }, { Core.QuestKindLookup(api, "nameplate1") })
+      -- Missing APIs.
+      assert.are.same({ false, false, "missing", false, false, false },
+        { Core.QuestKindLookup(tooltipAPI(lines), "nameplate1") })
+      assert.are.same({ false, false, "missing", false, false, false },
+        { Core.QuestKindLookup(tooltipAPI(lines, { GetQuestObjectives = objectivesOf, TooltipLineTypes = false }),
+          "nameplate1") })
+      -- The quest log failing: every open objective is guessed from the unit's name (the
+      -- tooltip's first line): "Démon squelette : …" a kill, "Doigt de squelette : 4/10" a loot.
+      api = tooltipAPI(lines, { GetQuestObjectives = function() error("boom") end })
+      assert.are.same({ true, true, "guessed", true, false, true }, { Core.QuestKindLookup(api, "nameplate1") })
+      -- And without the unit's name either: "none".
+      table.remove(lines, 1)
+      assert.are.same({ false, false, "none", false, false, true }, { Core.QuestKindLookup(api, "nameplate1") })
+    end)
+
+    it("IsSelfName: the tooltip's full name (with the last name) is the player's", function()
+      assert.is_true(Core.IsSelfName("Brom", "Brom"))
+      assert.is_true(Core.IsSelfName("Brom Boutefeu", "Brom"))
+      assert.is_false(Core.IsSelfName("Bromwell", "Brom"))
+      assert.is_false(Core.IsSelfName("Sara Cetamol", "Brom"))
+      assert.is_false(Core.IsSelfName("Brom Boutefeu", nil))
+      assert.is_false(Core.IsSelfName(nil, "Brom"))
+    end)
+
+    it("QuestKindLookup: the player's full name in a group is the player's (Forever's last names)", function()
+      -- The lines of "Côtes de sanglier à la bière", the player Brom Boutefeu with Sara Cetamol.
+      local lines = {
+        { type = 2, leftText = "Sanglier des rochers" },
+        { type = 17, leftText = "Côtes de sanglier à la bière", id = 384 },
+        who("Me Boutefeu"), objective("Côtes de sanglier des rochers : 0/6"),
+        who("Sara Cetamol"), objective("Côtes de sanglier des rochers : 0/6"),
+      }
+      local api = tooltipAPI(lines, { GetQuestObjectives = function()
+        return { { text = "Côtes de sanglier des rochers : 0/6", type = "item", finished = false } }
+      end })
+      -- The player's loot (yellow), and Sara's too.
+      assert.are.same({ false, true, "tooltip", false, true, true }, { Core.QuestKindLookup(api, "nameplate1") })
+      -- PartyQuestLookup: Sara's objective is still a party member's.
+      assert.are.same({ true, "tooltip" }, { Core.PartyQuestLookup(api, "nameplate1") })
+      lines[5] = who("Me Boutefeu")
+      assert.are.same({ false, "none" }, { Core.PartyQuestLookup(api, "nameplate1") })
+    end)
+
+    it("GuessKind: an objective naming the unit is a kill, any other one a loot", function()
+      assert.are.equal("monster", Core.GuessKind("Petit sanglier des rochers : 3/8", "Petit sanglier des rochers"))
+      assert.are.equal("monster", Core.GuessKind("Kobold Vermin slain: 3/10", "Kobold Vermin"))
+      assert.are.equal("monster", Core.GuessKind("kobold vermin slain: 3/10", "Kobold Vermin"))
+      assert.are.equal("item", Core.GuessKind("Défense de sanglier : 2/6", "Petit sanglier des rochers"))
+      assert.is_nil(Core.GuessKind("Défense de sanglier : 2/6", nil))
+      assert.is_nil(Core.GuessKind(nil, "Boar"))
+      assert.is_nil(Core.GuessKind("3/8", "Boar"))
+    end)
+
+    it("QuestKindLookup guesses a party member's objective that the quest log cannot type", function()
+      -- A party member's quest the player does not have: GetQuestObjectives gives nothing.
+      local lines = {
+        { type = 2, leftText = "Petit sanglier des rochers" },
+        { type = 17, leftText = "Q", id = 5 }, who("Gonald"), objective("Petit sanglier des rochers : 3/8"),
+        { type = 17, leftText = "R", id = 6 }, who("Gonald"), objective("Défense de sanglier : 2/6"),
+      }
+      local api = tooltipAPI(lines, { GetQuestObjectives = function() return nil end })
+      assert.are.same({ false, false, "guessed", true, true, false }, { Core.QuestKindLookup(api, "nameplate1") })
+      -- Without the tooltip's name line, UnitName(unit).
+      table.remove(lines, 1)
+      api = tooltipAPI(lines, { GetQuestObjectives = function() return nil end,
+        UnitName = function(unit) return unit == "player" and "Me" or "Petit sanglier des rochers" end })
+      assert.are.same({ false, false, "guessed", true, true, false }, { Core.QuestKindLookup(api, "nameplate1") })
+      -- No name at all: nothing guessed.
+      api = tooltipAPI(lines, { GetQuestObjectives = function() return nil end })
+      assert.are.same({ false, false, "none", false, false, false }, { Core.QuestKindLookup(api, "nameplate1") })
+      -- A logged kind and a guessed one: "tooltip".
+      lines = {
+        { type = 2, leftText = "Petit sanglier des rochers" },
+        { type = 17, leftText = "Q", id = 5 }, objective("Petit sanglier des rochers : 3/8"),
+        { type = 17, leftText = "R", id = 6 }, who("Gonald"), objective("Défense de sanglier : 2/6"),
+      }
+      api = tooltipAPI(lines, { GetQuestObjectives = function(id)
+        return id == 5 and { { text = "Petit sanglier des rochers : 3/8", type = "monster" } } or nil
+      end })
+      assert.are.same({ true, false, "tooltip", false, true, true }, { Core.QuestKindLookup(api, "nameplate1") })
     end)
 
     it("ObjectiveOpen reads completed, else a n/m count", function()
