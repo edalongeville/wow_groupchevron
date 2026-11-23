@@ -228,7 +228,7 @@ local function load(opts)
         return { lines = world.tooltips[unit] or {} }
       end,
     },
-    Enum = { TooltipDataLineType = { QuestObjective = 8, QuestTitle = 17, QuestPlayer = 18 } },
+    Enum = { TooltipDataLineType = { UnitName = 2, QuestObjective = 8, QuestTitle = 17, QuestPlayer = 18 } },
     IsInGroup = function() return world.inGroup end,
     UnitName = function(unit) return unit == "player" and "Me" or nil end,
     UnitGUID = function(unit) return "Player-" .. tostring(unit) end,
@@ -3285,6 +3285,36 @@ describe("GroupChevron", function()
       local single = singleChevron(env, plate)
       assert.is_true(single.shown)
       assert.are.equal("#FFFF00", hex(single.textures[1].vertex))
+      assert.is_false(printedContains(env, "error in"))
+    end)
+
+    it("shows a party member's icons even for a quest the player does not have", function()
+      local env = load()
+      env.world.inGroup = true
+      local plate = newTreePlate("nameplate2")
+      -- Not in the player's quest log: no objectives for it.
+      env.world.tooltips.nameplate2 = {
+        { type = 2, leftText = "Petit sanglier des rochers" },
+        { type = 17, leftText = "Q", id = 5 }, { type = 18, leftText = "Gonald" },
+        { type = 8, leftText = "Petit sanglier des rochers : 3/8" },
+      }
+      env.world.plates.nameplate2 = plate
+      env.world.attackable.nameplate2 = true
+      env.fire("NAME_PLATE_UNIT_ADDED", "nameplate2")
+      local frame, kill, loot = questIcons(env, plate)
+      assert.is_true(frame.shown)
+      assert.is_true(kill.shown)
+      assert.are.equal("#FFFFFF", hex(kill.vertex))
+      assert.is_true(loot == nil or not loot.shown)
+      local single = singleChevron(env, plate)
+      assert.is_true(single == nil or single.shown == false)
+      -- An item to loot from it instead: the white sack.
+      env.world.tooltips.nameplate2[4] = { type = 8, leftText = "Défense de sanglier : 2/6" }
+      env.fire("NAME_PLATE_UNIT_ADDED", "nameplate2")
+      local _, kill2, loot2 = questIcons(env, plate)
+      assert.is_false(kill2.shown)
+      assert.is_true(loot2.shown)
+      assert.are.equal("#FFFFFF", hex(loot2.vertex))
       assert.is_false(printedContains(env, "error in"))
     end)
 

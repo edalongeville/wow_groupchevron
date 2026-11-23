@@ -550,7 +550,7 @@ describe("GroupChevron Core", function()
   end)
 
   describe("hostiles tied to a party member's quest", function()
-    local TYPES = { QuestObjective = 8, QuestTitle = 17, QuestPlayer = 18 }
+    local TYPES = { UnitName = 2, QuestObjective = 8, QuestTitle = 17, QuestPlayer = 18 }
     -- tooltipAPI answers GetTooltipUnit with { lines = lines } for every unit; the player is "Me".
     local function tooltipAPI(lines, overrides)
       local api = {
@@ -661,9 +661,52 @@ describe("GroupChevron Core", function()
       assert.are.same({ false, false, "missing", false, false },
         { Core.QuestKindLookup(tooltipAPI(lines, { GetQuestObjectives = objectivesOf, TooltipLineTypes = false }),
           "nameplate1") })
-      -- Errors are "none".
+      -- The quest log failing: every open objective is guessed from the unit's name (the
+      -- tooltip's first line): "Démon squelette : …" a kill, "Doigt de squelette : 4/10" a loot.
       api = tooltipAPI(lines, { GetQuestObjectives = function() error("boom") end })
+      assert.are.same({ true, true, "guessed", true, false }, { Core.QuestKindLookup(api, "nameplate1") })
+      -- And without the unit's name either: "none".
+      table.remove(lines, 1)
       assert.are.same({ false, false, "none", false, false }, { Core.QuestKindLookup(api, "nameplate1") })
+    end)
+
+    it("GuessKind: an objective naming the unit is a kill, any other one a loot", function()
+      assert.are.equal("monster", Core.GuessKind("Petit sanglier des rochers : 3/8", "Petit sanglier des rochers"))
+      assert.are.equal("monster", Core.GuessKind("Kobold Vermin slain: 3/10", "Kobold Vermin"))
+      assert.are.equal("monster", Core.GuessKind("kobold vermin slain: 3/10", "Kobold Vermin"))
+      assert.are.equal("item", Core.GuessKind("Défense de sanglier : 2/6", "Petit sanglier des rochers"))
+      assert.is_nil(Core.GuessKind("Défense de sanglier : 2/6", nil))
+      assert.is_nil(Core.GuessKind(nil, "Boar"))
+      assert.is_nil(Core.GuessKind("3/8", "Boar"))
+    end)
+
+    it("QuestKindLookup guesses a party member's objective that the quest log cannot type", function()
+      -- A party member's quest the player does not have: GetQuestObjectives gives nothing.
+      local lines = {
+        { type = 2, leftText = "Petit sanglier des rochers" },
+        { type = 17, leftText = "Q", id = 5 }, who("Gonald"), objective("Petit sanglier des rochers : 3/8"),
+        { type = 17, leftText = "R", id = 6 }, who("Gonald"), objective("Défense de sanglier : 2/6"),
+      }
+      local api = tooltipAPI(lines, { GetQuestObjectives = function() return nil end })
+      assert.are.same({ false, false, "guessed", true, true }, { Core.QuestKindLookup(api, "nameplate1") })
+      -- Without the tooltip's name line, UnitName(unit).
+      table.remove(lines, 1)
+      api = tooltipAPI(lines, { GetQuestObjectives = function() return nil end,
+        UnitName = function(unit) return unit == "player" and "Me" or "Petit sanglier des rochers" end })
+      assert.are.same({ false, false, "guessed", true, true }, { Core.QuestKindLookup(api, "nameplate1") })
+      -- No name at all: nothing guessed.
+      api = tooltipAPI(lines, { GetQuestObjectives = function() return nil end })
+      assert.are.same({ false, false, "none", false, false }, { Core.QuestKindLookup(api, "nameplate1") })
+      -- A logged kind and a guessed one: "tooltip".
+      lines = {
+        { type = 2, leftText = "Petit sanglier des rochers" },
+        { type = 17, leftText = "Q", id = 5 }, objective("Petit sanglier des rochers : 3/8"),
+        { type = 17, leftText = "R", id = 6 }, who("Gonald"), objective("Défense de sanglier : 2/6"),
+      }
+      api = tooltipAPI(lines, { GetQuestObjectives = function(id)
+        return id == 5 and { { text = "Petit sanglier des rochers : 3/8", type = "monster" } } or nil
+      end })
+      assert.are.same({ true, false, "tooltip", false, true }, { Core.QuestKindLookup(api, "nameplate1") })
     end)
 
     it("ObjectiveOpen reads completed, else a n/m count", function()

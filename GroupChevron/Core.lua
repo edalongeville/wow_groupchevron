@@ -1447,6 +1447,23 @@ function Core.ObjectiveType(api, objectives, text)
   return only
 end
 
+-- GuessKind guesses the type of an objective that the player's quest log cannot type (a party
+-- member's quest the player does not have: C_QuestLog.GetQuestObjectives needs the quest in the
+-- log): a kill objective names the creature (the client writes "<unit name>: n/m" or "<unit name>
+-- slain: n/m" in its own language), so an objective text holding the unit's name, as the tooltip
+-- shows it, is a kill ("monster"), and any other one names an item to loot ("item"). No word of any
+-- language is looked for. nil when the text or the name cannot be read.
+function Core.GuessKind(text, unitName)
+  local bare = Core.StripCount(text)
+  if not bare or bare == "" or type(unitName) ~= "string" or unitName == "" then
+    return nil
+  end
+  if bare:lower():find(unitName:lower(), 1, true) then
+    return "monster"
+  end
+  return "item"
+end
+
 -- QuestKindLookup tells what is left to do to unit, for the player's own quests and for their
 -- party members': kill it (an open "monster" objective) and / or loot a quest item from it (an
 -- open "item" objective). From the unit's tooltip data (api.GetTooltipUnit, the mouseover
@@ -1456,10 +1473,13 @@ end
 -- an unreadable name nobody's (skipped). Each open QuestObjective line (ObjectiveOpen) gets its type
 -- from ObjectiveType with api.GetQuestObjectives(questID): the player's quest log, which also
 -- knows a party member's quest the player has too (their counts differ: ObjectiveType then
--- matches the text without them); other types (object, event, log...) count as neither. It
--- returns kill, loot (the player's own), the source ("tooltip": at least one kind found, own or
--- party; "none": nothing, also when an API raises an error or returns a secret value; "missing":
--- an API or a line type does not exist on this client), partyKill and partyLoot.
+-- matches the text without them); other types (object, event, log...) count as neither. An
+-- objective the log cannot type (a party member's quest the player does not have) is guessed from
+-- its text and the unit's name (GuessKind; the name from the tooltip's UnitName line, else
+-- api.UnitName(unit)). It returns kill, loot (the player's own), the source ("tooltip": at least
+-- one kind typed by the quest log; "guessed": kinds found, none of them typed by the log; "none":
+-- nothing, also when an API raises an error or returns a secret value; "missing": an API or a line
+-- type does not exist on this client), partyKill and partyLoot.
 function Core.QuestKindLookup(api, unit)
   if type(api) ~= "table" or type(api.GetTooltipUnit) ~= "function"
     or type(api.GetQuestObjectives) ~= "function" then
@@ -1483,8 +1503,13 @@ function Core.QuestKindLookup(api, unit)
   if type(selfName) ~= "string" then
     selfName = nil
   end
-  -- found.self / found.party: the kinds found for the player and for party members.
+  -- The unit's name, for GuessKind: the tooltip's UnitName line, else UnitName(unit).
+  local tName = read(api, types, "UnitName")
+  local unitName
+  -- found.self / found.party: the kinds found for the player and for party members; logged: at
+  -- least one of them typed by the quest log.
   local found = { self = {}, party = {} }
+  local logged = false
   -- quest: the current quest's ID (nil: none or unreadable); owner: whose objectives the lines
   -- are ("self", "party", or nil: nobody's).
   local quest, owner = nil, nil
@@ -1496,7 +1521,10 @@ function Core.QuestKindLookup(api, unit)
     end
     local kind = read(api, line, "type")
     if kind ~= nil then
-      if kind == tTitle then
+      if tName ~= nil and kind == tName and unitName == nil then
+        local name = read(api, line, "leftText")
+        unitName = type(name) == "string" and name or nil
+      elseif kind == tTitle then
         local id = read(api, line, "id")
         quest, owner = type(id) == "number" and id or nil, "self"
       elseif tPlayer ~= nil and kind == tPlayer then
@@ -1512,7 +1540,17 @@ function Core.QuestKindLookup(api, unit)
         if objectives[quest] == nil then
           objectives[quest] = call(api, "GetQuestObjectives", quest) or false
         end
-        local t = Core.ObjectiveType(api, objectives[quest], read(api, line, "leftText"))
+        local text = read(api, line, "leftText")
+        local t = Core.ObjectiveType(api, objectives[quest], text)
+        if t ~= nil then
+          logged = true
+        else
+          if unitName == nil then
+            local name = call(api, "UnitName", unit)
+            unitName = type(name) == "string" and name or false
+          end
+          t = Core.GuessKind(text, unitName or nil)
+        end
         if t == "monster" then
           found[owner].kill = true
         elseif t == "item" then
@@ -1523,8 +1561,8 @@ function Core.QuestKindLookup(api, unit)
   end
   local mine, party = found.self, found.party
   local any = mine.kill or mine.loot or party.kill or party.loot
-  return mine.kill == true, mine.loot == true, any and "tooltip" or "none", party.kill == true,
-    party.loot == true
+  local source = (any and logged and "tooltip") or (any and "guessed") or "none"
+  return mine.kill == true, mine.loot == true, source, party.kill == true, party.loot == true
 end
 
 -- readRGB returns the r, g, b (numbers in 0..1, none secret) of a class colour c: a ColorMixin
