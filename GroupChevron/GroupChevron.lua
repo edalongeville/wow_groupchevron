@@ -2882,6 +2882,14 @@ local function OpenOptions()
   end
 end
 
+-- The game's add-on menu under the minimap's calendar (the "Addon Compartment", patch 10.1.0 and
+-- the Forever client): `## AddonCompartmentFunc` in the .toc names this global, called on a click
+-- on GroupChevron's entry (its icon is the .toc's IconTexture). It opens the options, like
+-- /gchev options. A global, not a local: the .toc can only name globals.
+function GroupChevron_OnAddonCompartmentClick()
+  SafeCall("addon compartment", OpenOptions)
+end
+
 -- ---------------------------------------------------------------------------------------
 -- Blizzard's nameplate driver
 --

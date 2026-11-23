@@ -7,6 +7,7 @@ globals = {
   "SlashCmdList",
   "GroupChevronDB", -- SavedVariables of GroupChevron
   "SLASH_GROUPCHEVRON1",
+  "GroupChevron_OnAddonCompartmentClick", -- ## AddonCompartmentFunc in the .toc
 }
 
 -- WoW API used (read only). Every one of them is checked for existence before use.
