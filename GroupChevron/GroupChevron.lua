@@ -16,6 +16,9 @@
 -- A hostile (attackable) unit tied to one of the player's active quests (C_QuestLog.UnitIsRelatedToActiveQuest:
 -- kill, item drop, ...) gets its name in the hostile colour (default #FFFF00) and a single "V"
 -- chevron above it, in that colour; the rest of its plate is left as Blizzard draws it.
+-- A hostile unit not tied to the player's quests but to an objective a party member still has
+-- to do (read from the unit's tooltip data, C_TooltipInfo.GetUnit: the lines the mouseover
+-- tooltip shows) gets the same look in the party quest colour (default #FFFFFF).
 -- Friendly NPCs: with npcicons on (default), one with a role (flight master, innkeeper, banker,
 -- auctioneer, stable master, trainer, repairer, vendor) gets the role's icon above its name; with
 -- npccompact on (default) every friendly NPC's plate shows the name only; npcsize sizes their
@@ -216,6 +219,13 @@ local unitAPI = {
   -- (a boolean, documented for the Forever client 1.60.1); missing = no hostile is ever marked.
   UnitCanAttack = UnitCanAttack,
   IsRelatedToActiveQuest = Field(C_QuestLog, "UnitIsRelatedToActiveQuest"),
+  -- Party members' quests: the unit's tooltip data (GetTooltipUnit, below with the service NPCs)
+  -- and its line types (Enum.TooltipDataLineType: QuestTitle, QuestPlayer, QuestObjective), read
+  -- only in a group (IsInGroup); unverified on the Forever client, missing = no party quest
+  -- hostile is marked.
+  TooltipLineTypes = Field(Enum, "TooltipDataLineType"),
+  IsInGroup = IsInGroup,
+  UnitName = UnitName,
   UnitGUID = UnitGUID,
   UnitHealth = UnitHealth,
   UnitHealthMax = UnitHealthMax,
@@ -294,6 +304,18 @@ local function HostileColor()
   return c[1], c[2], c[3]
 end
 
+-- PartyQuest holds the helpers of the hostile units tied to a party member's quest (one table, not
+-- top-level locals: the main chunk is close to Lua 5.1's limit of 200 locals). Color returns
+-- their colour.
+local PartyQuest = {}
+function PartyQuest.Color()
+  if type(db) == "table" and Core.ValidColor(db.partyquestcolor) then
+    return db.partyquestcolor[1], db.partyquestcolor[2], db.partyquestcolor[3]
+  end
+  local c = Core.DEFAULT_PARTYQUEST_COLOR
+  return c[1], c[2], c[3]
+end
+
 -- FLAG_DEFAULTS are the saved on/off settings (besides enabled and compact) and their default.
 local FLAG_DEFAULTS = {
   friendchevron = true, bnetfriends = true, guildchevron = true, classcolor = Core.DEFAULT_CLASSCOLOR, showlevel = true,
@@ -312,7 +334,8 @@ end
 -- members "textsize", "barsize" (health bar), "buffsize" (auras); for other friendly players
 -- (compact or not, the target included, see Core.OtherSizes) "othersize" (name) and
 -- "otherbarsize" (health bar, shown while hurt when compact); for the hostiles tied to a quest
--- "hostilechevsize" (their single chevron) and "hostilesize" (name).
+-- "hostilechevsize" (their single chevron) and "hostilesize" (name); for the hostiles tied to a
+-- party member's quest "partyquestchevsize" and "partyquestsize".
 local function Factor(key)
   if type(db) == "table" and Core.ValidFactor(db[key], key) then
     return db[key]
@@ -322,7 +345,8 @@ end
 
 -- Gap returns a saved name gap (Core.DefaultGap when missing or invalid, see Core.ValidGap):
 -- "namegap" for group members, "othernamegap" for other friendly players (wherever othersize applies),
--- "hostilenamegap" for the hostiles tied to a quest.
+-- "hostilenamegap" for the hostiles tied to a quest, "partyquestnamegap" for those tied to a party
+-- member's quest.
 local function Gap(key)
   if type(db) == "table" and Core.ValidGap(db[key]) then
     return db[key]
@@ -1235,13 +1259,20 @@ end
 
 -- HostileStyle is the look of a hostile unit tied to a quest: its full plate as Blizzard draws it,
 -- with our name in the hostile colour at hostilesize and hostilenamegap and a single chevron
--- (hostilechevsize) in the same colour.
-local function HostileStyle()
-  local r, g, b = HostileColor()
+-- (hostilechevsize) in the same colour. With party (a unit tied to a party member's quest): the
+-- same look in the party quest colour at partyquestsize, partyquestnamegap and partyquestchevsize.
+local function HostileStyle(party)
+  local prefix = party and "partyquest" or "hostile"
+  local r, g, b
+  if party then
+    r, g, b = PartyQuest.Color()
+  else
+    r, g, b = HostileColor()
+  end
   return {
-    kind = "quest", r = r, g = g, b = b, chevron = true, single = true, size = Factor("hostilesize"),
-    scales = false, gap = Gap("hostilenamegap"), outlinesize = Factor("hostileoutlinesize"),
-    chevsize = "hostilechevsize",
+    kind = party and "partyquest" or "quest", r = r, g = g, b = b, chevron = true, single = true,
+    size = Factor(prefix .. "size"), scales = false, gap = Gap(prefix .. "namegap"),
+    outlinesize = Factor(prefix .. "outlinesize"), chevsize = prefix .. "chevsize",
   }
 end
 
@@ -1744,7 +1775,8 @@ local function Info(unit)
   return Core.UnitInfo(unitAPI, unit, ModeSettings())
 end
 
--- Mode returns the plate mode of unit ("member", "quest", "friend", "class", "compact" or "default"),
+-- Mode returns the plate mode of unit ("member", "quest", "partyquest", "friend", "class", "compact" or
+-- "default"),
 -- its relation ("member", "friend" or nil), see Core.PlateMode, and the info it was read from.
 local function Mode(unit)
   local info = Info(unit)
@@ -1833,6 +1865,10 @@ local function Apply(uf, unit, restore)
     -- A hostile unit tied to a quest: full plate, our name and single chevron in the hostile colour.
     Uncompact(uf)
     Mark(uf, uf, HostileStyle())
+  elseif mode == "partyquest" then
+    -- A hostile unit tied to a party member's quest: the same, in the party quest colour.
+    Uncompact(uf)
+    Mark(uf, uf, HostileStyle(true))
   elseif mode == "npc" then
     -- A friendly NPC: "<name> (<level>)", its subtitle below, the role icon above when it has one
     -- (and npcicons is on); with npccompact, the health bar only while hurt, the target included.
@@ -2088,6 +2124,16 @@ local function SetHostileColor(r, g, b)
   return true
 end
 
+-- PartyQuest.SetColor takes r, g, b in 0..1.
+function PartyQuest.SetColor(r, g, b)
+  if type(db) ~= "table" or not Core.ValidColor({ r, g, b }) then
+    return false
+  end
+  db.partyquestcolor = { r, g, b }
+  Changed()
+  return true
+end
+
 -- SetFlag sets one of FLAG_DEFAULTS from true/false or the text "on"/"off".
 local function SetFlag(kind, value)
   if type(db) ~= "table" or FLAG_DEFAULTS[kind] == nil then
@@ -2110,6 +2156,7 @@ local FACTOR_KINDS = {
   hostilechevsize = true, hostilesize = true, friendchevsize = true, guildchevsize = true,
   memberoutlinesize = true, friendoutlinesize = true, guildoutlinesize = true, hostileoutlinesize = true,
   npciconsize = true, npcsize = true, friendsize = true, guildsize = true, npciconalpha = true,
+  partyquestchevsize = true, partyquestsize = true, partyquestoutlinesize = true,
 }
 
 -- SetFactor sets one of FACTOR_KINDS from a number (the panel's slider) or a
@@ -2132,7 +2179,8 @@ local function SetFactor(kind, value)
   return true
 end
 
--- SetGap sets one of Core.GAP_KINDS (namegap, othernamegap, hostilenamegap) from a number (the panel's slider,
+-- SetGap sets one of Core.GAP_KINDS (namegap, othernamegap, hostilenamegap, partyquestnamegap) from a
+-- number (the panel's slider,
 -- rounded to a whole point) or a text (the slash command, a whole number). Out of range or
 -- invalid: refused, nothing changes.
 local function SetGap(kind, value)
@@ -2363,7 +2411,7 @@ local function BuildPanel()
     root = NewPage("GroupChevron", 120),
     main = NewPage(L("page_main"), 140),
     players = NewPage(L("page_players"), 1090),
-    quests = NewPage(L("page_quests"), 340),
+    quests = NewPage(L("page_quests"), 580),
     npcs = NewPage(L("page_npcs"), 340),
   }
 
@@ -2723,6 +2771,21 @@ local function BuildPanel()
   content = pages.quests.content
   Preview(-82, true, HostileColor, "hostileoutlinesize", "hostilechevsize")
 
+  -- Party quest hostiles (enemies tied to a party member's quest): the same controls as the
+  -- hostiles, in their own group right below them on the Quest mobs page. Created after every
+  -- other slider and swatch and before the font control, so the existing widgets keep their
+  -- creation order.
+  Group(L("party_hostiles"), -290, 232)
+  Label(L("name_colour"), 16, -330)
+  local partyQuestFill = Swatch(-324, PartyQuest.Color, PartyQuest.SetColor, "partyquestcolor")
+  sliders[#sliders + 1] = { "partyquestchevsize", Slider(L("chevron_size"), -410, "partyquestchevsize") }
+  sliders[#sliders + 1] = { "partyquestsize", Slider(L("text_size"), -450, "partyquestsize") }
+  sliders[#sliders + 1] = { "partyquestnamegap", Slider(L("name_gap"), -490, "partyquestnamegap") }
+  sliders[#sliders + 1] = {
+    "partyquestoutlinesize", Slider(L("outline_size"), -370, "partyquestoutlinesize", OUTLINE_GEOMETRY),
+  }
+  Preview(-324, true, PartyQuest.Color, "partyquestoutlinesize", "partyquestchevsize")
+
   -- Name font: a drop-down listing Core.FONTS, beside the name colour of the group members.
   -- Without the client's UIDropDownMenu API it falls back to a button that cycles through them.
   -- Created last: the specs find buttons by creation order.
@@ -2832,6 +2895,7 @@ local function BuildPanel()
       guildFill:SetColorTexture(GuildColor())
       guildChevronBox:SetChecked(Flag("guildchevron"))
       hostileFill:SetColorTexture(HostileColor())
+      partyQuestFill:SetColorTexture(PartyQuest.Color())
       for _, preview in ipairs(previews) do
         preview.update()
       end
@@ -2857,7 +2921,7 @@ local function BuildPanel()
   content = pages.players.content
   ResetButton(-1046, "players")
   content = pages.quests.content
-  ResetButton(-296, "quests")
+  ResetButton(-538, "quests")
   content = pages.npcs.content
   ResetButton(-334, "npcs")
 
@@ -3230,6 +3294,22 @@ local QUEST_SOURCE_NAMES = {
   skipped = "not asked: not known to be attackable",
 }
 
+-- PartyQuest.Text says whether unit counts as a hostile unit tied to a party member's quest, and
+-- which answer it comes from, e.g. "target party quest hostile: yes (C_TooltipInfo.GetUnit)".
+function PartyQuest.Text(unit, what)
+  local sources = {
+    tooltip = "C_TooltipInfo.GetUnit",
+    none = "none",
+    nogroup = "not in a group",
+    missing = "API missing",
+    skipped = "not asked: not known to be attackable, or tied to your own quests",
+  }
+  local info = Info(unit)
+  return string.format("%s party quest hostile: %s (%s)", what,
+    Core.PartyQuestHostile(info, ModeSettings()) and "yes" or "no",
+    sources[info.partyQuestSource] or tostring(info.partyQuestSource))
+end
+
 -- QuestText says whether unit counts as a hostile unit tied to a quest, and which answer it comes
 -- from, e.g. "target quest hostile: yes (UnitIsRelatedToActiveQuest, attackable true)".
 local function QuestText(unit, what)
@@ -3290,12 +3370,14 @@ local function SlashStatus()
   elseif lastNameField then
     field = "UnitFrame." .. lastNameField
   end
-  local n, friends, guildmates, classes, quests, services = 0, 0, 0, 0, 0, 0
+  local n, friends, guildmates, classes, quests, services, partyQuests = 0, 0, 0, 0, 0, 0, 0
   for _, m in pairs(marks) do
     if m.kind == "member" then
       n = n + 1
     elseif m.kind == "quest" then
       quests = quests + 1
+    elseif m.kind == "partyquest" then
+      partyQuests = partyQuests + 1
     elseif m.kind == "npc" or m.kind == "npccompact" then
       services = services + 1
     elseif m.kind == "guild" or m.kind == "guildcompact" then
@@ -3323,6 +3405,10 @@ local function SlashStatus()
   Print(string.format("hostiles (quest): colour %s, hostilechevsize %s, hostilesize %s, hostilenamegap %d, "
     .. "%d plate(s) marked; %s", Core.FormatColor(HostileColor()), tostring(Factor("hostilechevsize")),
     tostring(Factor("hostilesize")), Gap("hostilenamegap"), quests, QuestText("target", "target")))
+  Print(string.format("party quest hostiles: colour %s, partyquestchevsize %s, partyquestsize %s, "
+    .. "partyquestnamegap %d, %d plate(s) marked; %s", Core.FormatColor(PartyQuest.Color()),
+    tostring(Factor("partyquestchevsize")), tostring(Factor("partyquestsize")), Gap("partyquestnamegap"),
+    partyQuests, PartyQuest.Text("target", "target")))
   local learned = 0
   for _ in pairs(type(db.npcroles) == "table" and db.npcroles or {}) do
     learned = learned + 1
@@ -3356,13 +3442,14 @@ local function SlashStatus()
     .. " | friendchevsize 1-5 | guildchevsize 1-5 | friendsize 1-3 | guildsize 1-3 | hostilecolor #RRGGBB"
     .. " | hostilechevsize 1-5"
     .. " | hostilesize 1-3 | hostilenamegap -40-40"
-    .. " | memberoutlinesize|friendoutlinesize|guildoutlinesize|hostileoutlinesize 0-5"
+    .. " | partyquestcolor #RRGGBB | partyquestchevsize 1-5 | partyquestsize 1-3 | partyquestnamegap -40-40"
+    .. " | memberoutlinesize|friendoutlinesize|guildoutlinesize|hostileoutlinesize|partyquestoutlinesize 0-5"
     .. " | othersize 1-3 | otherbarsize 1-3 | othernamegap -40-40 | level on|off | compact on|off | classcolor on|off"
     .. " | font default|outline|chat|large|game13"
     .. " | npcplates on|off | softinteract on|off | npcicons on|off | npccompact on|off | npcsize 1-3"
     .. " | npcnamegap -40-40 | npciconsize 1-15 | npciconalpha 0.1-1"
     .. " | icon [<role> <texture or atlas>|default]"
-    .. " | reset | options | debug")
+    .. " | reset | options | debug [all]")
 end
 
 -- PartLabel names a plate part for /gchev debug: its frame name, else the field that holds it
@@ -3480,7 +3567,73 @@ local function HealthDebug(unit, uf)
   end
 end
 
-local function SlashDebug()
+local function SlashDebug(arg)
+  -- ScaleDebug prints, for /gchev debug, the scales of the target's plate, its UnitFrame,
+  -- Blizzard's name and our own name frame ("scale S eff E", plus "ignores parent" when it ignores
+  -- its parent's scale), and both names' font object and size: run it near and far from the same
+  -- unit to see which one changes with distance. Nothing it prints is ever compared.
+  local function ScaleDebug(plate, uf, fs)
+    local function ScaleText(obj)
+      if type(obj) ~= "table" then
+        return "-"
+      end
+      local out = string.format("scale %s eff %s", ValueText(Method(obj, "GetScale")),
+        ValueText(Method(obj, "GetEffectiveScale")))
+      if Method(obj, "IsIgnoringParentScale") == true then
+        out = out .. " ignores parent"
+      end
+      return out
+    end
+    local function FontText(f)
+      if type(f) ~= "table" then
+        return "-"
+      end
+      local obj = Method(f, "GetFontObject")
+      local objName = type(obj) == "table" and Method(obj, "GetName") or nil
+      local font = Results(f, "GetFont")
+      return string.format("font %s size %s", ValueText(objName), ValueText(font and font[2]))
+    end
+    local rec = labels[uf]
+    Print(string.format("debug: scales: plate %s; UnitFrame %s; Blizzard name %s, %s", ScaleText(plate),
+      ScaleText(uf), ScaleText(fs), FontText(fs)))
+    Print(string.format("debug: scales: our name frame %s, %s", ScaleText(rec and rec.frame),
+      FontText(rec and rec.text)))
+  end
+  -- /gchev debug all: the same lines for every visible plate the addon marked (not only the
+  -- target: some changes only show on plates that are not targeted), with the mark's kind, the
+  -- alpha and shown state of Blizzard's name and of each of our labels (name with level, name
+  -- alone, subtitle line), to tell a font or scale change from two labels drawn over each other.
+  if type(arg) == "string" and arg:lower() == "all" then
+    local plates = type(C_NamePlate) == "table" and Try(C_NamePlate.GetNamePlates)
+    if type(plates) ~= "table" then
+      Print("debug all: no nameplates")
+      return
+    end
+    local function Look(obj)
+      if type(obj) ~= "table" then
+        return "-"
+      end
+      return string.format("alpha %s shown %s", ValueText(Method(obj, "GetAlpha")), ValueText(Method(obj, "IsShown")))
+    end
+    local n = 0
+    for _, p in ipairs(plates) do
+      local u = UnitFrameOf(p)
+      if u and marks[u] then
+        n = n + 1
+        local unit = PlateUnit(p)
+        local rec = labels[u]
+        local fs = FindName(u)
+        Print(string.format("debug all: %s %q (%s), target %s", tostring(unit),
+          tostring(unit and Try(UnitName, unit) or "?"), tostring(marks[u].kind),
+          ValueText(unit and Try(UnitIsUnit, unit, "target"))))
+        ScaleDebug(p, u, fs)
+        Print(string.format("debug all: Blizzard name %s; ours: name %s, short %s, subtitle %s; frame %s",
+          Look(fs), Look(rec and rec.text), Look(rec and rec.short), Look(rec and rec.sub), Look(rec and rec.frame)))
+      end
+    end
+    Print(string.format("debug all: %d marked plate(s)", n))
+    return
+  end
   local plate = PlateForUnit("target")
   if type(plate) ~= "table" then
     Print("debug: no nameplate for the current target")
@@ -3498,6 +3651,8 @@ local function SlashDebug()
   Print("debug: " .. FriendText(unit, "target"))
   Print("debug: " .. GuildText(unit, "target"))
   Print("debug: " .. QuestText(unit, "target"))
+  Print("debug: " .. PartyQuest.Text(unit, "target"))
+  ScaleDebug(plate, uf, fs0)
   Print("debug: " .. ServiceText(unit, "target"))
   Print("debug: " .. ClassText(unit))
   -- Blizzard's name on this plate, and whether ours covers it (enemies without a name: Blizzard's
@@ -3608,7 +3763,7 @@ local function Slash(msg)
     cmd = "classcolor"
   end
   if cmd == "debug" then
-    SlashDebug()
+    SlashDebug(arg)
     return
   end
   if cmd == "names" then
@@ -3708,6 +3863,19 @@ local function Slash(msg)
       return
     end
     Print("hostilecolor " .. Core.FormatColor(r, g, b))
+  elseif cmd == "partyquestcolor" or cmd == "partyquestcolour" then
+    if arg == "" then
+      Print(string.format("partyquestcolor %s (default %s)", Core.FormatColor(PartyQuest.Color()),
+        Core.FormatColor(unpack(Core.DEFAULT_PARTYQUEST_COLOR))))
+      return
+    end
+    local r, g, b = Core.ParseColor(arg)
+    if not r or not PartyQuest.SetColor(r, g, b) then
+      Print(string.format(
+        "invalid partyquestcolor %q: use #RRGGBB, e.g. /gchev partyquestcolor #FFFFFF; nothing changed", arg))
+      return
+    end
+    Print("partyquestcolor " .. Core.FormatColor(r, g, b))
   elseif FLAG_DEFAULTS[cmd] ~= nil then
     if arg == "" then
       Print(string.format("%s %s (on or off, default %s)", cmd, Flag(cmd) and "on" or "off",
