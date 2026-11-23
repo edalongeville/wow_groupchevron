@@ -90,11 +90,14 @@ end
 -- (chevsize, and hostilechevsize for the single chevron of the hostiles), which go up to 5.
 Core.MIN_FACTOR = 1
 -- The outline thicknesses (memberoutlinesize, friendoutlinesize, guildoutlinesize, hostileoutlinesize)
--- start at 0: no outline.
-Core.MIN_FACTORS = { memberoutlinesize = 0, friendoutlinesize = 0, guildoutlinesize = 0, hostileoutlinesize = 0 }
+-- start at 0: no outline. npciconalpha is the role icon's opacity: 0.1 (faint, never invisible) to 1
+-- (opaque, the default).
+Core.MIN_FACTORS = { memberoutlinesize = 0, friendoutlinesize = 0, guildoutlinesize = 0, hostileoutlinesize = 0,
+  npciconalpha = 0.1 }
 Core.DEFAULT_MAX_FACTOR = 3
 Core.MAX_FACTORS = { chevsize = 5, hostilechevsize = 5, friendchevsize = 5, guildchevsize = 5,
-  memberoutlinesize = 5, friendoutlinesize = 5, guildoutlinesize = 5, hostileoutlinesize = 5, npciconsize = 15 }
+  memberoutlinesize = 5, friendoutlinesize = 5, guildoutlinesize = 5, hostileoutlinesize = 5, npciconsize = 15,
+  npciconalpha = 1 }
 Core.DEFAULT_FACTOR = 1
 -- DEFAULT_FACTORS are the defaults of the kinds that do not start at DEFAULT_FACTOR (1, which
 -- also stays the "no scaling" value the plates compare against). The hostiles start where the
@@ -304,6 +307,7 @@ Core.Locales = {
     services = "Friendly NPCs",
     show_icons = "Show role icons",
     icon_size = "Icon size",
+    icon_alpha = "Icon opacity",
     npc_plates = "Friendly NPC nameplates",
     soft_interact = "Auto-target NPCs (gamepad)",
     page_main = "Main",
@@ -336,6 +340,7 @@ Core.Locales = {
     services = "PNJ amicaux",
     show_icons = "Afficher les icônes de rôle",
     icon_size = "Taille des icônes",
+    icon_alpha = "Opacité des icônes",
     npc_plates = "Plaques des PNJ amicaux",
     soft_interact = "Ciblage auto. des PNJ (manette)",
     page_main = "Principal",
@@ -368,6 +373,7 @@ Core.Locales = {
     services = "Freundliche NSCs",
     show_icons = "Rollensymbole anzeigen",
     icon_size = "Symbolgröße",
+    icon_alpha = "Symboldeckkraft",
     npc_plates = "Plaketten freundlicher NSCs",
     soft_interact = "NSCs automatisch anvisieren (Gamepad)",
     page_main = "Allgemein",
@@ -400,6 +406,7 @@ Core.Locales = {
     services = "PNJ amistosos",
     show_icons = "Mostrar iconos de función",
     icon_size = "Tamaño del icono",
+    icon_alpha = "Opacidad del icono",
     npc_plates = "Placas de PNJ amistosos",
     soft_interact = "Fijar PNJ automáticamente (mando)",
     page_main = "General",
@@ -432,6 +439,7 @@ Core.Locales = {
     services = "PNG amichevoli",
     show_icons = "Mostra icone del ruolo",
     icon_size = "Dimensione icona",
+    icon_alpha = "Opacità icona",
     npc_plates = "Targhette dei PNG amichevoli",
     soft_interact = "Bersaglio automatico PNG (controller)",
     page_main = "Generale",
@@ -464,6 +472,7 @@ Core.Locales = {
     services = "PNJs amistosos",
     show_icons = "Mostrar ícones de função",
     icon_size = "Tamanho do ícone",
+    icon_alpha = "Opacidade do ícone",
     npc_plates = "Placas de PNJs amistosos",
     soft_interact = "Mirar PNJs automaticamente (controle)",
     page_main = "Geral",
@@ -496,6 +505,7 @@ Core.Locales = {
     services = "Дружественные НИП",
     show_icons = "Показать значки ролей",
     icon_size = "Размер значка",
+    icon_alpha = "Непрозрачность значка",
     npc_plates = "Индикаторы дружественных НИП",
     soft_interact = "Автовыбор НИП (геймпад)",
     page_main = "Основное",
@@ -528,6 +538,7 @@ Core.Locales = {
     services = "우호적 NPC",
     show_icons = "역할 아이콘 표시",
     icon_size = "아이콘 크기",
+    icon_alpha = "아이콘 불투명도",
     npc_plates = "우호적 NPC 이름표",
     soft_interact = "NPC 자동 대상 지정 (게임패드)",
     page_main = "일반",
@@ -560,6 +571,7 @@ Core.Locales = {
     services = "友方NPC",
     show_icons = "显示职能图标",
     icon_size = "图标大小",
+    icon_alpha = "图标不透明度",
     npc_plates = "友方NPC姓名板",
     soft_interact = "自动选中NPC（手柄）",
     page_main = "常规",
@@ -592,6 +604,7 @@ Core.Locales = {
     services = "友方NPC",
     show_icons = "顯示職能圖示",
     icon_size = "圖示大小",
+    icon_alpha = "圖示不透明度",
     npc_plates = "友方NPC名條",
     soft_interact = "自動選取NPC（手把）",
     page_main = "一般",
@@ -639,7 +652,7 @@ function Core.InitDB(db)
   for _, key in ipairs({ "chevsize", "textsize", "othersize", "barsize", "buffsize", "otherbarsize",
     "hostilechevsize", "hostilesize", "friendchevsize", "guildchevsize", "memberoutlinesize",
     "friendoutlinesize", "guildoutlinesize", "hostileoutlinesize", "npciconsize", "npcsize", "friendsize",
-    "guildsize" }) do
+    "guildsize", "npciconalpha" }) do
     if not Core.ValidFactor(db[key], key) then
       db[key] = Core.DefaultFactor(key)
     end
@@ -701,7 +714,7 @@ Core.PAGE_KEYS = {
     "friendchevsize", "guildchevsize", "memberoutlinesize", "friendoutlinesize", "guildoutlinesize", "namegap",
     "othernamegap", "friendsize", "guildsize" },
   quests = { "hostilecolor", "hostilechevsize", "hostilesize", "hostileoutlinesize", "hostilenamegap" },
-  npcs = { "npcicons", "npccompact", "npcsize", "npciconsize", "npcnamegap" },
+  npcs = { "npcicons", "npccompact", "npcsize", "npciconsize", "npcnamegap", "npciconalpha" },
 }
 
 -- ResetPage puts the settings of the options page page (a key of PAGE_KEYS) back to their

@@ -124,6 +124,14 @@ describe("GroupChevron Core", function()
       assert.are.equal(5, Core.DefaultGap("othernamegap"))
       -- Friendly NPCs: lower by default (their name sits in the faded health bar's place).
       assert.are.equal(-20, Core.DEFAULT_NPC_GAP)
+      -- The role icon's opacity: 0.1 to 1, default 1.
+      assert.are.equal(1, Core.InitDB({}).npciconalpha)
+      assert.are.equal(0.4, Core.InitDB({ npciconalpha = 0.4 }).npciconalpha)
+      for _, bad in ipairs({ 0, 0.05, 1.2, "0.5", true }) do
+        assert.are.equal(1, Core.InitDB({ npciconalpha = bad }).npciconalpha)
+      end
+      assert.are.equal(0.75, Core.ParseFactor("0.75", "npciconalpha"))
+      assert.is_nil(Core.ParseFactor("2", "npciconalpha"))
       assert.are.equal(-20, Core.DefaultGap("npcnamegap"))
       assert.are.equal(-20, Core.InitDB({}).npcnamegap)
       assert.are.equal(-20, Core.InitDB({ npcnamegap = 41 }).npcnamegap)
