@@ -2421,9 +2421,10 @@ local function BuildPanel()
   -- The options are split into pages, like the Settings sub-categories of other addons: the
   -- GroupChevron category itself (a title and a hint) and its sub-categories Main, Friendly
   -- players, Quest mobs and NPCs. Each page is a scroll frame (scroll bar on the right, 28 px
-  -- margin) whose child frame holds its widgets; `content` is the page the widgets below are
-  -- created on (the helpers read it when they are called), switched before each section. Every
-  -- page refreshes all the controls when it is shown.
+  -- margin, shown only when the page is taller than the panel) whose child frame holds its
+  -- widgets; `content` is the page the widgets below are created on (the helpers read it when they
+  -- are called), switched before each section. Every page refreshes all the controls when it is
+  -- shown.
   local content
   local function NewPage(title, height)
     local panel = CreateFrame("Frame", nil, nil)
@@ -2434,8 +2435,29 @@ local function BuildPanel()
     local child = CreateFrame("Frame", nil, scroll)
     child:SetSize(600, height)
     scroll:SetScrollChild(child)
+    -- The scroll bar only when there is something to scroll: the template's own handler hides it
+    -- with scrollBarHideable (ScrollFrame_OnScrollRangeChanged), and SyncBar does it again after
+    -- that handler and when the page is shown, from the frame's scroll range (0: it all fits).
+    scroll.scrollBarHideable = true
+    local function SyncBar()
+      local bar = Field(scroll, "ScrollBar")
+      local range = Method(scroll, "GetVerticalScrollRange")
+      if type(bar) ~= "table" or type(range) ~= "number" then
+        return
+      end
+      if range > 0.5 then
+        Method(bar, "Show")
+      else
+        Method(bar, "Hide")
+        Method(scroll, "SetVerticalScroll", 0)
+      end
+    end
+    Method(scroll, "HookScript", "OnScrollRangeChanged", function()
+      SafeCall("options scroll bar", SyncBar)
+    end)
     panel:SetScript("OnShow", function()
       SafeCall("options panel show", RefreshPanel)
+      SafeCall("options scroll bar", SyncBar)
     end)
     return { panel = panel, content = child, title = title }
   end

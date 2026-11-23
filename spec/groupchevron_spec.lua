@@ -4429,6 +4429,36 @@ describe("GroupChevron", function()
       assert.is_true(printedContains(env, "reset | options | debug"))
     end)
 
+    it("shows a page's scroll bar only when the page is taller than the panel", function()
+      local overrides, rec = widgetClient()
+      load({ overrides = overrides })
+      -- Every page's scroll frame: a scroll bar and a scroll range (0: it all fits).
+      local scrolls = {}
+      for _, c in ipairs(rec.created) do
+        if c.kind == "ScrollFrame" then
+          local scroll = c.f
+          assert.is_true(scroll.scrollBarHideable)
+          scroll.range = 0
+          scroll.ScrollBar = { shown = true }
+          function scroll.ScrollBar:Show() self.shown = true end
+          function scroll.ScrollBar:Hide() self.shown = false end
+          function scroll:GetVerticalScrollRange() return self.range end
+          function scroll:SetVerticalScroll(v) self.scrolled = v end
+          scrolls[c.parent] = scroll
+        end
+      end
+      local panel = rec.pages["Main"]
+      local scroll = scrolls[panel]
+      -- It fits: no bar, scrolled back to the top.
+      panel.scripts.OnShow(panel)
+      assert.is_false(scroll.ScrollBar.shown)
+      assert.are.equal(0, scroll.scrolled)
+      -- Taller than the panel: the bar.
+      scroll.range = 120
+      panel.scripts.OnShow(panel)
+      assert.is_true(scroll.ScrollBar.shown)
+    end)
+
     local function panelTexts(rec)
       local texts = {}
       for _, c in ipairs(rec.created) do
