@@ -180,8 +180,8 @@ local function load(opts)
     -- to an active quest (C_QuestLog.UnitIsRelatedToActiveQuest); world.questCalls counts the asks.
     attackable = {}, quests = {}, questCalls = 0,
     -- world.inGroup: IsInGroup(); world.tooltips[unit]: the lines of C_TooltipInfo.GetUnit(unit);
-    -- world.tooltipCalls counts the asks.
-    inGroup = false, tooltips = {}, tooltipCalls = 0 }
+    -- world.tooltipCalls counts the asks; world.objectives[questID]: C_QuestLog.GetQuestObjectives.
+    inGroup = false, tooltips = {}, tooltipCalls = 0, objectives = {} }
   local modernColors = { MAGE = { 0, 1, 1 }, PRIEST = { 1, 1, 1 } }
   local api = {
     print = function(msg) printed[#printed + 1] = msg end,
@@ -220,6 +220,7 @@ local function load(opts)
         world.questCalls = world.questCalls + 1
         return world.quests[unit] == true
       end,
+      GetQuestObjectives = function(id) return world.objectives[id] end,
     },
     C_TooltipInfo = {
       GetUnit = function(unit)
@@ -3120,6 +3121,124 @@ describe("GroupChevron", function()
       env.fire("NAME_PLATE_UNIT_ADDED", "nameplate2")
     end
 
+    -- questIcons returns the quest hostile icon frame of a plate and its kill and loot textures
+    -- (the coloured ones, not their black outline copies), if any.
+    local function questIcons(env, plate)
+      for _, f in ipairs(env.frames) do
+        if f.parent == plate.UnitFrame then
+          local kill, loot
+          for _, t in ipairs(f.textures) do
+            if t.vertex and t.vertex[1] ~= 0 then
+              if t.texture == "Interface\\AddOns\\GroupChevron\\quest_kill.tga" then
+                kill = t
+              elseif t.texture == "Interface\\AddOns\\GroupChevron\\quest_loot.tga" then
+                loot = t
+              end
+            end
+          end
+          if kill or loot then
+            return f, kill, loot
+          end
+        end
+      end
+      return nil
+    end
+
+    -- singleChevron returns a plate's single chevron frame (its "V" texture), if any.
+    local function singleChevron(env, plate)
+      for _, f in ipairs(env.frames) do
+        if f.parent == plate.UnitFrame then
+          for _, t in ipairs(f.textures) do
+            if t.texture == "Interface\\AddOns\\GroupChevron\\chevron.tga" then
+              return f
+            end
+          end
+        end
+      end
+      return nil
+    end
+
+    it("shows the kill and loot icons in place of the single chevron, from the tooltip and the quest log", function()
+      local env = load()
+      local plate = newTreePlate("nameplate2")
+      -- The lines the Forever client gave for a quest mob (French client, solo).
+      env.world.tooltips.nameplate2 = {
+        { type = 2, leftText = "Démon squelette" },
+        { type = 17, leftText = "Les Veilleurs", id = 57 },
+        { type = 8, leftText = "Démon squelette : 13/15 personnages tués" },
+        { type = 17, leftText = "Le Totem d'affliction", id = 101 },
+        { type = 8, leftText = "Doigt de squelette : 4/10" },
+      }
+      env.world.objectives[57] = {
+        { text = "Démon squelette : 13/15 personnages tués", type = "monster", finished = false },
+      }
+      env.world.objectives[101] = {
+        { text = "Croc de goule : 0/10", type = "item", finished = false },
+        { text = "Doigt de squelette : 4/10", type = "item", finished = false },
+      }
+      questHostile(env, plate)
+      local frame, kill, loot = questIcons(env, plate)
+      assert.is_true(frame.shown)
+      assert.is_true(kill.shown)
+      assert.is_true(loot.shown)
+      -- Side by side, kill first, in the hostile colour; the frame GAP above our name.
+      assert.are.equal("#FFFF00", hex(kill.vertex))
+      assert.are.equal("#FFFF00", hex(loot.vertex))
+      assert.are.equal(0, kill.points[1][4])
+      assert.is_true(loot.points[1][4] > kill.w)
+      assert.are.equal(env.label(plate), frame.points[1][2])
+      -- The size of the chevron it replaces (hostilechevsize 1 in these specs): 4.5 x 9 each.
+      assert.are.same({ 4.5, 9 }, { kill.w, kill.h })
+      -- No single chevron.
+      local single = singleChevron(env, plate)
+      assert.is_true(single == nil or single.shown == false)
+      -- The item objective done: the kill icon alone, at the left.
+      env.world.tooltips.nameplate2[5].leftText = "Doigt de squelette : 10/10"
+      env.fire("NAME_PLATE_UNIT_ADDED", "nameplate2")
+      assert.is_true(kill.shown)
+      assert.is_false(loot.shown)
+      assert.are.equal(0, kill.points[1][4])
+      -- Nothing known (an unreadable tooltip): the single chevron, as before.
+      env.world.tooltips.nameplate2 = {}
+      env.fire("NAME_PLATE_UNIT_ADDED", "nameplate2")
+      assert.is_false(frame.shown)
+      assert.is_true(singleChevron(env, plate).shown)
+      -- Loot only: the sack, and the chevron gives way again.
+      env.world.tooltips.nameplate2 = {
+        { type = 17, leftText = "Le Totem d'affliction", id = 101 },
+        { type = 8, leftText = "Croc de goule : 2/10" },
+      }
+      env.fire("NAME_PLATE_UNIT_ADDED", "nameplate2")
+      assert.is_true(frame.shown)
+      assert.is_false(kill.shown)
+      assert.is_true(loot.shown)
+      assert.are.equal(0, loot.points[1][4])
+      assert.is_false(singleChevron(env, plate).shown)
+      -- No longer tied to a quest: nothing of ours.
+      env.world.quests.nameplate2 = false
+      env.fire("NAME_PLATE_UNIT_ADDED", "nameplate2")
+      assert.is_false(frame.shown)
+      assert.is_false(printedContains(env, "error in"))
+    end)
+
+    it("prints what is left to do to a quest hostile in /gchev debug", function()
+      local env = load()
+      local plate = newTreePlate("nameplate2")
+      env.world.tooltips.nameplate2 = {
+        { type = 17, leftText = "Les Veilleurs", id = 57 },
+        { type = 8, leftText = "Démon squelette : 13/15 personnages tués" },
+      }
+      env.world.objectives[57] = { { text = "Démon squelette : 13/15 personnages tués", type = "monster" } }
+      questHostile(env, plate)
+      -- /gchev debug asks about "target".
+      env.world.plates.target = plate
+      env.world.attackable.target, env.world.quests.target = true, true
+      env.world.tooltips.target = env.world.tooltips.nameplate2
+      env.slash("debug")
+      assert.is_true(printedContains(env, "quest hostile: yes"))
+      assert.is_true(printedContains(env, "kill yes, loot no (tooltip)"))
+    end)
+
     -- untouched checks that nothing of ours is on the plate.
     local function untouched(env, plate)
       local label, holder = env.label(plate)
@@ -4237,9 +4356,23 @@ describe("GroupChevron", function()
             assert.are.equal(content, t.points[1][2], name)
           end
         end
-        -- A double chevron per section on the players' page, a single one per quest mobs section.
-        assert.are.equal(name == "Quest mobs" and count or 2 * count, vs, name)
+        -- A double chevron per section on the players' page; on the quest mobs page, the party
+        -- quest hostiles' single one (the quest hostiles show their kill and loot icons).
+        assert.are.equal(name == "Quest mobs" and count - 1 or 2 * count, vs, name)
       end
+      local content = page(rec, "Quest mobs")
+      local icons = {}
+      for _, t in ipairs(content.textures) do
+        if t.vertex and t.vertex[1] ~= 0 and (t.texture == "Interface\\AddOns\\GroupChevron\\quest_kill.tga"
+          or t.texture == "Interface\\AddOns\\GroupChevron\\quest_loot.tga") then
+          icons[#icons + 1] = t
+          assert.are.equal(content, t.points[1][2])
+          assert.is_true(t.shown ~= false)
+        end
+      end
+      assert.are.equal(2, #icons)
+      -- Side by side, kill first.
+      assert.is_true(icons[1].points[1][4] < icons[2].points[1][4])
     end)
 
     it("falls back to one category per page without sub-categories", function()
@@ -4713,29 +4846,38 @@ describe("GroupChevron", function()
           end
         end
       end
-      -- Members, friends and guildmates: two "V"s of eight copies each; hostiles and party quest
-      -- hostiles: one "V" each (the party quest one is created last).
-      assert.are.equal(3 * 16 + 8 + 8, #owned)
-      local hostile = {}
-      for i = #owned - 15, #owned - 8 do
-        hostile[#hostile + 1] = owned[i]
+      -- Members, friends and guildmates: two "V"s of eight copies each; party quest hostiles: one
+      -- "V". The quest hostiles' preview shows their kill and loot icons instead (below).
+      assert.are.equal(3 * 16 + 8, #owned)
+      local content = page(rec, "Quest mobs")
+      local hostile, kill = {}, nil
+      for _, t in ipairs(content.textures) do
+        if t.texture == "Interface\\AddOns\\GroupChevron\\quest_kill.tga" then
+          if t.vertex and t.vertex[1] == 0 then
+            hostile[#hostile + 1] = t
+          else
+            kill = t
+          end
+        end
       end
+      assert.are.equal(8, #hostile)
       assert.is_true(hostile[1].shown)
-      -- Thickness 2 at chevron size 1 (these specs): 0.1875 * 2 * 1 points to the right for the first copy.
+      -- Thickness 2 at size 1 (these specs): 0.1875 * 2 * 1 points to the right for the first copy.
+      assert.are.equal(kill, hostile[1].points[1][2])
       assert.is_true(math.abs(hostile[1].points[1][4] - 0.375) < 1e-9)
       local slider = widget(rec, "Slider", 15)
       slider.scripts.OnMouseDown(slider)
       slider.scripts.OnValueChanged(slider, 3)
       assert.is_true(math.abs(hostile[1].points[1][4] - 0.5625) < 1e-9)
       assert.are.equal(2, env.GroupChevronDB.hostileoutlinesize) -- not saved before the release
-      -- The chevron size slider resizes the preview too (the square is 72 wide, the "V" 10 * size).
-      assert.are.equal(10, hostile[1].w)
+      -- The icon size slider resizes the preview too (each icon 4.5 x 9 * size, in a 72 square).
+      assert.are.equal(4.5, kill.w)
       local size = widget(rec, "Slider", 12)
       size.scripts.OnValueChanged(size, 5)
-      assert.are.equal(50, hostile[1].w)
-      assert.are.equal(25, hostile[1].owner.h)
+      assert.are.equal(22.5, kill.w)
+      assert.are.equal(45, kill.h)
       size.scripts.OnValueChanged(size, 1)
-      assert.are.equal(10, hostile[1].w)
+      assert.are.equal(4.5, kill.w)
       slider.scripts.OnValueChanged(slider, 0)
       assert.is_false(hostile[1].shown)
       slider.scripts.OnValueChanged(slider, 4)
