@@ -117,17 +117,23 @@ describe("GroupChevron Core", function()
   end)
 
   describe("name gaps", function()
-    it("accepts whole numbers from -10 to 40, default 5", function()
+    it("accepts whole numbers from -40 to 40, default 5", function()
       assert.are.equal(5, Core.DEFAULT_GAP)
       assert.are.equal(0, Core.NO_GAP)
       assert.are.equal(5, Core.DefaultGap("namegap"))
       assert.are.equal(5, Core.DefaultGap("othernamegap"))
+      -- Friendly NPCs: lower by default (their name sits in the faded health bar's place).
+      assert.are.equal(-20, Core.DEFAULT_NPC_GAP)
+      assert.are.equal(-20, Core.DefaultGap("npcnamegap"))
+      assert.are.equal(-20, Core.InitDB({}).npcnamegap)
+      assert.are.equal(-20, Core.InitDB({ npcnamegap = 41 }).npcnamegap)
+      assert.are.equal(3, Core.InitDB({ npcnamegap = 3 }).npcnamegap)
       assert.is_true(Core.GAP_KINDS.namegap)
       assert.is_true(Core.GAP_KINDS.othernamegap)
-      for _, v in ipairs({ -10, -1, 0, 4, 40 }) do
+      for _, v in ipairs({ -40, -10, -1, 0, 4, 40 }) do
         assert.is_true(Core.ValidGap(v), tostring(v))
       end
-      for _, v in ipairs({ -11, 41, 2.5, 0 / 0, 1 / 0, -1 / 0, "4", true, {} }) do
+      for _, v in ipairs({ -41, 41, 2.5, 0 / 0, 1 / 0, -1 / 0, "4", true, {} }) do
         assert.is_false(Core.ValidGap(v), tostring(v))
       end
       assert.is_false(Core.ValidGap(nil))
@@ -138,9 +144,9 @@ describe("GroupChevron Core", function()
       assert.are.equal(-3, Core.ParseGap(" -3 "))
       assert.are.equal(2, Core.ParseGap("+2"))
       assert.are.equal(0, Core.ParseGap("0"))
-      assert.are.equal(-10, Core.ParseGap("-10"))
+      assert.are.equal(-40, Core.ParseGap("-40"))
       assert.are.equal(40, Core.ParseGap("40"))
-      for _, bad in ipairs({ "-11", "41", "1.5", "abc", "", " ", "0x2", "1e1", "--2", "+-2", "2 3", "nan", "inf" }) do
+      for _, bad in ipairs({ "-41", "41", "1.5", "abc", "", " ", "0x2", "1e1", "--2", "+-2", "2 3", "nan", "inf" }) do
         assert.is_nil(Core.ParseGap(bad), bad)
       end
       assert.is_nil(Core.ParseGap(nil))
@@ -152,7 +158,7 @@ describe("GroupChevron Core", function()
       assert.are.equal(-2, Core.SnapGap(-2.4))
       assert.are.equal(40, Core.SnapGap(40.2))
       assert.is_nil(Core.SnapGap(41))
-      assert.is_nil(Core.SnapGap(-10.6))
+      assert.is_nil(Core.SnapGap(-40.6))
       assert.is_nil(Core.SnapGap(0 / 0))
       assert.is_nil(Core.SnapGap(1 / 0))
       assert.is_nil(Core.SnapGap("3"))
@@ -175,7 +181,7 @@ describe("GroupChevron Core", function()
       db = Core.InitDB({ namegap = 6, othernamegap = -4 })
       assert.are.equal(6, db.namegap)
       assert.are.equal(-4, db.othernamegap)
-      for _, bad in ipairs({ 2.5, 41, -11, "3", 0 / 0, true, {} }) do
+      for _, bad in ipairs({ 2.5, 41, -41, "3", 0 / 0, true, {} }) do
         db = Core.InitDB({ namegap = bad, othernamegap = bad })
         assert.are.equal(5, db.namegap)
         assert.are.equal(5, db.othernamegap)
@@ -426,12 +432,12 @@ describe("GroupChevron Core", function()
         assert.are.equal(3, db.hostilechevsize)
         assert.are.equal(1.5, db.hostilesize)
       end
-      for _, bad in ipairs({ "x", 41, -11, 2.5, 0 / 0, true }) do
+      for _, bad in ipairs({ "x", 41, -41, 2.5, 0 / 0, true }) do
         assert.are.equal(5, Core.InitDB({ hostilenamegap = bad }).hostilenamegap)
       end
     end)
 
-    it("accepts a hostile chevron size up to 5, the text size up to 3 and the gap from -10 to 40", function()
+    it("accepts a hostile chevron size up to 5, the text size up to 3 and the gap from -40 to 40", function()
       assert.is_true(Core.ValidFactor(5, "hostilechevsize"))
       assert.is_false(Core.ValidFactor(5.05, "hostilechevsize"))
       assert.is_true(Core.ValidFactor(3, "hostilesize"))

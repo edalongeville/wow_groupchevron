@@ -158,15 +158,21 @@ end
 -- puts its name above the health bar, in whole UI points (the parent's units, not scaled by the
 -- text size): "namegap" for group members, "othernamegap" for other friendly players (compact
 -- or not, the target included, like othersize), "hostilenamegap" for the hostiles tied to a
--- quest. 0 is the layout without a gap (NO_GAP); the default of every kind is DEFAULT_GAP.
-Core.MIN_GAP = -10
+-- quest. 0 is the layout without a gap (NO_GAP); the default of every kind is DEFAULT_GAP, but
+-- npcnamegap's is DEFAULT_NPC_GAP (0.24.0: the name sits in the faded health bar's place, and the
+-- plate is placed well above the model).
+Core.MIN_GAP = -40
 Core.MAX_GAP = 40
 Core.NO_GAP = 0
 Core.DEFAULT_GAP = 5
+Core.DEFAULT_NPC_GAP = -20
 Core.GAP_KINDS = { namegap = true, othernamegap = true, hostilenamegap = true, npcnamegap = true }
 
 -- DefaultGap is the default of a gap kind.
-function Core.DefaultGap(_)
+function Core.DefaultGap(kind)
+  if kind == "npcnamegap" then
+    return Core.DEFAULT_NPC_GAP
+  end
   return Core.DEFAULT_GAP
 end
 

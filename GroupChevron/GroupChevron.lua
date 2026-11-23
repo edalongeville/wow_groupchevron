@@ -100,8 +100,10 @@ local lastNameField -- the field name found on the last marked plate ("" = none 
 -- has its own frame and the other one is hidden.
 local chevrons = setmetatable({}, { __mode = "k" })
 local singles = setmetatable({}, { __mode = "k" })
--- icons: UnitFrame -> the service NPC role icon frame (its child, created once, lazily).
-local icons = setmetatable({}, { __mode = "k" })
+-- iconCaches.high: UnitFrame -> the service NPC role icon frame (its child, created once,
+-- lazily); iconCaches.low: the same for the low copy of a compact NPC plate (see FollowBar).
+-- One table for both: the main chunk is at Lua's limit of 200 locals.
+local iconCaches = { high = setmetatable({}, { __mode = "k" }), low = setmetatable({}, { __mode = "k" }) }
 -- marks: UnitFrame -> { fs = name FontString or nil, orig = Blizzard's { r, g, b, a } or nil,
 -- applied = our last { r, g, b } } while its plate is marked.
 local marks = setmetatable({}, { __mode = "k" })
@@ -587,8 +589,9 @@ end
 local ICON_SIZE = 6
 
 -- GetIcon returns the plate's role icon frame, creating it on first use (nil without CreateFrame).
-local function GetIcon(plate, uf)
-  local frame = icons[plate]
+local function GetIcon(plate, uf, cache)
+  cache = cache or iconCaches.high
+  local frame = cache[plate]
   if frame then
     return frame
   end
@@ -599,7 +602,7 @@ local function GetIcon(plate, uf)
   frame.tex = frame:CreateTexture(nil, "OVERLAY")
   Method(frame.tex, "SetAllPoints", frame)
   frame:Hide()
-  icons[plate] = frame
+  cache[plate] = frame
   return frame
 end
 
@@ -645,11 +648,12 @@ local function SetIconTexture(tex, name)
   return ok and loaded ~= false
 end
 
--- ShowIcon shows role's icon on the plate, its bottom GAP above anchor (else above uf). It returns
--- false (and hides the icon) when the role has no icon or the client cannot load its texture.
-local function ShowIcon(plate, uf, anchor, role)
+-- ShowIcon shows role's icon on the plate, its bottom GAP above anchor (else above uf), at alpha 1.
+-- It returns false (and hides the icon) when the role has no icon or the client cannot load its
+-- texture. cache is iconCaches.high (default) or iconCaches.low.
+local function ShowIcon(plate, uf, anchor, role, cache)
   local path = IconName(role)
-  local frame = path and GetIcon(plate, uf)
+  local frame = path and GetIcon(plate, uf, cache)
   if not frame then
     return false
   end
@@ -668,16 +672,19 @@ local function ShowIcon(plate, uf, anchor, role)
   frame:ClearAllPoints()
   frame:SetPoint("BOTTOM", anchor or uf, "TOP", 0, GAP)
   frame.role = role
+  Method(frame, "SetAlpha", 1)
   frame:Show()
   return true
 end
 
--- HideIcon hides the plate's role icon.
-local function HideIcon(plate)
-  local frame = icons[plate]
-  if frame then
-    frame.role = nil
-    frame:Hide()
+-- HideIcon hides the plate's role icon; with lowOnly, only the low copy's.
+local function HideIcon(plate, lowOnly)
+  for _, cache in ipairs(lowOnly and { iconCaches.low } or { iconCaches.high, iconCaches.low }) do
+    local frame = cache[plate]
+    if frame then
+      frame.role = nil
+      frame:Hide()
+    end
   end
 end
 
@@ -778,10 +785,13 @@ end
 -- (Core.NameWithLevel); FollowBar may then drop the suffix while the health bar is shown, with
 -- a second FontString (rec.short, the name alone, created only for a level) drawn over the same
 -- spot. Here the suffix is always shown (rec.short at alpha 0). Blizzard's text itself is never
--- changed. It returns
--- our FontString (the chevron's anchor), or nil when the name stays Blizzard's (text or font
--- unreadable, no CreateFrame, or fs not shown).
-local function ShowFullName(plate, uf, fs, size, r, g, b, lift, gap, level, subtitle)
+-- changed. With low (a region: the health bar of a compact friendly NPC plate), a second copy of
+-- the name and subtitle (rec.lowtext, rec.lowsub) is drawn with its bottom on low's bottom
+-- (+ lift + gap), where the faded health bar is, at alpha 0: FollowBar then shows one copy
+-- or the other. It returns our FontString (the chevron's anchor) and the low copy's name (nil
+-- without low), or nil when the name stays Blizzard's (text or font unreadable, no CreateFrame,
+-- or fs not shown).
+local function ShowFullName(plate, uf, fs, size, r, g, b, lift, gap, level, subtitle, low)
   local plain = NameText(fs)
   local text = plain
   if text and level then
@@ -885,10 +895,62 @@ local function ShowFullName(plate, uf, fs, size, r, g, b, lift, gap, level, subt
   elseif rec.sub then
     rec.sub:Hide()
   end
+  -- The low copy (compact friendly NPCs): same font, shadow, colour and text, at the bar's place.
+  local lowLabel
+  if low then
+    local function dress(l)
+      if fontObject then
+        l:SetFontObject(fontObject)
+      else
+        l:SetFont(base[1], base[2], base[3])
+      end
+      if offset and type(offset[1]) == "number" and type(offset[2]) == "number" then
+        Method(l, "SetShadowOffset", offset[1], offset[2])
+        if sc and type(sc[1]) == "number" and type(sc[2]) == "number" and type(sc[3]) == "number" then
+          Method(l, "SetShadowColor", sc[1], sc[2], sc[3], type(sc[4]) == "number" and sc[4] or 1)
+        end
+      end
+      l:SetTextColor(r, g, b, 1)
+      l:ClearAllPoints()
+      Method(l, "SetAlpha", 0)
+    end
+    for _, key in ipairs({ "lowtext", "lowsub" }) do
+      if not rec[key] then
+        rec[key] = rec.frame:CreateFontString(nil, "OVERLAY")
+        Method(rec[key], "SetWordWrap", false)
+        Method(rec[key], "SetJustifyH", "CENTER")
+      end
+    end
+    lowLabel = rec.lowtext
+    dress(lowLabel)
+    lowLabel:SetText(text)
+    local y = Core.NameOffset(lift, gap, size)
+    if subtitle then
+      local lowsub = rec.lowsub
+      dress(lowsub)
+      lowsub:SetText(subtitle)
+      lowsub:SetPoint("BOTTOM", low, "BOTTOM", 0, y)
+      lowLabel:SetPoint("BOTTOM", lowsub, "TOP", 0, SUBTITLE_GAP)
+      lowsub:Show()
+    else
+      lowLabel:SetPoint("BOTTOM", low, "BOTTOM", 0, y)
+      rec.lowsub:Hide()
+    end
+    lowLabel:Show()
+    rec.low = true
+  else
+    rec.low = nil
+    for _, key in ipairs({ "lowtext", "lowsub" }) do
+      if rec[key] then
+        Method(rec[key], "SetAlpha", 0)
+        rec[key]:Hide()
+      end
+    end
+  end
   rec.name = fs
   FadeName(fs)
   rec.frame:Show()
-  return label
+  return label, lowLabel
 end
 
 -- ---------------------------------------------------------------------------------------
@@ -1189,7 +1251,7 @@ local function NpcStyle(role, compact, level, subtitle, c)
   return {
     kind = compact and "npccompact" or "npc", r = c[1], g = c[2], b = c[3], chevron = false, icon = role,
     size = Factor("npcsize"), scales = false, gap = Gap("npcnamegap"), level = level, keeplevel = true,
-    subtitle = subtitle and ("<" .. subtitle .. ">") or nil,
+    subtitle = subtitle and ("<" .. subtitle .. ">") or nil, low = compact,
   }
 end
 
@@ -1245,10 +1307,15 @@ local function Mark(plate, uf, style)
     NoticeOnce("noname", "name text not found on the nameplate (tried UnitFrame.name, .Name, .unitName): "
       .. "only the chevron is shown")
   end
-  local anchor = fs
+  local anchor, lowAnchor = fs, nil
   if fs and type(r) == "number" then
     local lift = style.scales and BuffLift(plate, uf) or 0
-    anchor = ShowFullName(plate, uf, fs, style.size, r, g, b, lift, style.gap, style.level, style.subtitle) or fs
+    -- Compact friendly NPCs: a second copy of the name where the faded health bar is (FollowBar).
+    local low = style.low and BarPart(uf) or nil
+    local shown
+    shown, lowAnchor = ShowFullName(plate, uf, fs, style.size, r, g, b, lift, style.gap, style.level,
+      style.subtitle, low)
+    anchor = shown or fs
   elseif fs then
     -- Blizzard's colour cannot be read: Blizzard's name stays as it is.
     HideFullName(plate)
@@ -1275,6 +1342,10 @@ local function Mark(plate, uf, style)
   -- The service NPCs' role icon, above the name like a chevron (never both).
   if not (style.icon and ShowIcon(plate, uf, anchor, style.icon)) then
     HideIcon(plate)
+  elseif lowAnchor and ShowIcon(plate, uf, lowAnchor, style.icon, iconCaches.low) then
+    Method(iconCaches.low[plate], "SetAlpha", 0) -- FollowBar shows it
+  else
+    HideIcon(plate, true)
   end
   if style.scales then
     ScaleBar(plate, uf, BarPart(uf), Factor("barsize"))
@@ -1372,20 +1443,73 @@ local function FullHealthAlpha(unit)
   return Core.HealthAlpha(unitAPI, unit, fullCurve)
 end
 
--- FollowBar makes the "(level)" after the name of the compact plate follow its health bar
--- (Core.LevelSuffix; nothing to do when ShowFullName drew no level there): Blizzard's bar shows
--- the level beside it, so the suffix goes while the bar is shown and comes back at full health.
--- With the curve, the name with the level gets FullHealthAlpha and the name alone (rec.short)
--- the bar's alpha, both possibly secret, applied, never compared; if either cannot be applied,
--- the suffix stays (name with the level at 1, the name alone at 0). Without the curve, the
--- text is chosen from hurt. Only our own FontStrings are touched, never Blizzard's name.
+-- FollowBar makes the compact plate's own name follow its health bar. Nameplate regions cannot be
+-- measured and, with the health curve, whether the bar is shown cannot be read (its alpha may be
+-- secret), so every text it switches is drawn beforehand and only alphas change: with the curve
+-- they get the bar's alpha or FullHealthAlpha, both possibly secret, applied, never compared.
+--
+-- Friendly NPCs (ShowFullName's low copy, rec.low): the name and subtitle (and role icon) are shown
+-- either above the health bar, where Blizzard puts its name (rec.text, rec.sub, iconCaches.high),
+-- or in the faded bar's place (rec.lowtext, rec.lowsub, iconCaches.low): low while the bar is
+-- hidden, high while it is shown, so the name never covers the bar. With the curve the high copy
+-- gets the bar's alpha and the low copy FullHealthAlpha. In doubt (an alpha that cannot be
+-- applied) the name stays above the bar, as before 0.24.0. NPCs always keep "(level)" (keepLevel).
+--
+-- Other compact plates: the "(level)" after the name (Core.LevelSuffix; nothing to do when
+-- ShowFullName drew no level there): Blizzard's bar shows the level beside it, so the suffix goes
+-- while the bar is shown and comes back at full health. With the curve, the name with the level
+-- gets FullHealthAlpha and the name alone (rec.short) the bar's alpha; if either cannot be
+-- applied, the suffix stays (name with the level at 1, the name alone at 0). Without the curve,
+-- the text is chosen from hurt. Only our own FontStrings are touched, never Blizzard's name.
 local function FollowBar(plate, unit, curve, alpha, barDriven, hurt)
   local rec = labels[plate]
+  local mode = Core.LevelSuffix(curve and true or false, barDriven, hurt)
+  if rec and rec.low and rec.lowtext then
+    local high, low = { rec.text }, { rec.lowtext }
+    if rec.sub then
+      high[#high + 1] = rec.sub
+    end
+    if rec.lowsub then
+      low[#low + 1] = rec.lowsub
+    end
+    if iconCaches.high[plate] then
+      high[#high + 1] = iconCaches.high[plate]
+    end
+    if iconCaches.low[plate] then
+      low[#low + 1] = iconCaches.low[plate]
+    end
+    if mode == "curve" then
+      local ok, full = FullHealthAlpha(unit)
+      local done = ok
+      if ok then
+        for _, part in ipairs(high) do
+          done = DriveAlpha(part, alpha) and done
+        end
+        for _, part in ipairs(low) do
+          done = DriveAlpha(part, full) and done
+        end
+      end
+      if done then
+        rec.place = "curve"
+        return
+      end
+      mode = "hide"
+    end
+    -- "hide": the bar is known shown, so the name goes above it.
+    local up = mode == "hide"
+    for _, part in ipairs(high) do
+      Method(part, "SetAlpha", up and 1 or 0)
+    end
+    for _, part in ipairs(low) do
+      Method(part, "SetAlpha", up and 0 or 1)
+    end
+    rec.place = up and "high" or "low"
+    return
+  end
   if not rec or not rec.full or not rec.short or rec.keepLevel then
     -- Friendly NPCs (keepLevel) always show "<name> (<level>)", as ShowFullName drew it.
     return
   end
-  local mode = Core.LevelSuffix(curve and true or false, barDriven, hurt)
   if mode == "curve" then
     local ok, full = FullHealthAlpha(unit)
     rec.text:SetText(rec.full)
@@ -1444,7 +1568,7 @@ local function CompactParts(plate, uf, showHealth)
   if chain[#chain] ~= uf then
     return nil
   end
-  for _, cache in ipairs({ chevrons, singles, icons }) do
+  for _, cache in ipairs({ chevrons, singles, iconCaches.high, iconCaches.low }) do
     if cache[plate] then
       keep[cache[plate]] = true
     end
@@ -3213,16 +3337,16 @@ local function SlashStatus()
   Print(string.format("class colour %s (other friendly players' names), %d plate(s) coloured",
     Flag("classcolor") and "on" or "off", classes))
   Print("/gchev on | off | color #RRGGBB | chevsize 1-5 | textsize 1-3 | barsize 1-3 | buffsize 1-3"
-    .. " | namegap -10-40 | friendcolor #RRGGBB | friendchevron on|off | bnetfriends on|off"
+    .. " | namegap -40-40 | friendcolor #RRGGBB | friendchevron on|off | bnetfriends on|off"
     .. " | guildcolor #RRGGBB | guildchevron on|off"
     .. " | friendchevsize 1-5 | guildchevsize 1-5 | friendsize 1-3 | guildsize 1-3 | hostilecolor #RRGGBB"
     .. " | hostilechevsize 1-5"
-    .. " | hostilesize 1-3 | hostilenamegap -10-40"
+    .. " | hostilesize 1-3 | hostilenamegap -40-40"
     .. " | memberoutlinesize|friendoutlinesize|guildoutlinesize|hostileoutlinesize 0-5"
-    .. " | othersize 1-3 | otherbarsize 1-3 | othernamegap -10-40 | level on|off | compact on|off | classcolor on|off"
+    .. " | othersize 1-3 | otherbarsize 1-3 | othernamegap -40-40 | level on|off | compact on|off | classcolor on|off"
     .. " | font default|outline|chat|large|game13"
     .. " | npcplates on|off | softinteract on|off | npcicons on|off | npccompact on|off | npcsize 1-3"
-    .. " | npcnamegap -10-40 | npciconsize 1-15"
+    .. " | npcnamegap -40-40 | npciconsize 1-15"
     .. " | icon [<role> <texture or atlas>|default]"
     .. " | reset | options | debug")
 end
@@ -3385,6 +3509,12 @@ local function SlashDebug()
     parts, verb = CompactParts(uf, uf), "compact would hide"
   end
   Print(string.format("debug: mode %s", Mode(unit)))
+  local label = labels[uf]
+  if label and label.low then
+    -- Compact friendly NPC: which copy of the name FollowBar shows (curve: the client decides).
+    Print(string.format("debug: NPC name place %s (low: the health bar's place, high: above it)",
+      tostring(label.place or "not set")))
+  end
   if not parts then
     Print("debug: compact cannot apply here (no name, or the name is not inside UnitFrame)")
     return
