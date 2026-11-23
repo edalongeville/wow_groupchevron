@@ -3593,6 +3593,19 @@ describe("GroupChevron", function()
       env.fire("UNIT_HEALTH", "nameplate5")
       assert.are.equal(1, name.alpha)
       assert.are.equal(0, high.alpha)
+      -- The icon's opacity (npciconalpha, default 0.8) goes on both copies' textures, never on their
+      -- frames (whose alpha picks the copy shown).
+      assert.are.same({ 0.8, 0.8 }, { highIcon.tex.alpha, lowIcon.tex.alpha })
+      env.slash("npciconalpha 0.5")
+      assert.are.same({ 0.5, 0.5 }, { highIcon.tex.alpha, lowIcon.tex.alpha })
+      assert.are.same({ 0, 1 }, { highIcon.alpha, lowIcon.alpha })
+      for _, bad in ipairs({ "0", "0.05", "1.5", "x" }) do
+        env.slash("npciconalpha " .. bad)
+        assert.are.equal(0.5, env.GroupChevronDB.npciconalpha)
+      end
+      assert.is_true(printedContains(env, "use a number from 0.1 to 1"))
+      env.slash("npciconalpha")
+      assert.is_true(printedContains(env, "npciconalpha 0.5 (0.1 to 1, default 0.8)"))
       -- npccompact off: full plate, the low copy hidden, the name above the bar.
       env.slash("npccompact off")
       assert.is_false(name.shown)
@@ -3858,7 +3871,8 @@ describe("GroupChevron", function()
       showNPC(env, plate)
       env.slash("")
       assert.is_true(printedContains(env,
-        "friendly NPCs: icons on, compact on, npcsize 1, npcnamegap -20, npciconsize 5, friendly NPC nameplates on"))
+        "friendly NPCs: icons on, compact on, npcsize 1, npcnamegap -20, npciconsize 5, npciconalpha 0.8, "
+        .. "friendly NPC nameplates on"))
       assert.is_true(printedContains(env, "1 plate(s) marked"))
       env.world.target = "nameplate5"
       env.world.plates.target = plate
@@ -4351,7 +4365,13 @@ describe("GroupChevron", function()
       assert.are.equal(2.5, env.GroupChevronDB.friendsize)
       guildText.scripts.OnValueChanged(guildText, 1.25)
       assert.are.equal(1.25, env.GroupChevronDB.guildsize)
-      assert.is_nil(widget(rec, "Slider", 23))
+      -- Then the role icon's opacity (0.1..1).
+      local iconAlpha = widget(rec, "Slider", 23)
+      iconAlpha.scripts.OnValueChanged(iconAlpha, 0.6)
+      assert.are.equal(0.6, env.GroupChevronDB.npciconalpha)
+      iconAlpha.scripts.OnValueChanged(iconAlpha, 0.05)
+      assert.are.equal(0.6, env.GroupChevronDB.npciconalpha)
+      assert.is_nil(widget(rec, "Slider", 24))
       assert.are.equal(2.25, env.GroupChevronDB.textsize)
 
       -- The panel shows the saved gaps when it opens.

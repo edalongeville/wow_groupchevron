@@ -669,6 +669,9 @@ local function ShowIcon(plate, uf, anchor, role, cache)
   end
   local size = ICON_SIZE * Factor("npciconsize")
   frame:SetSize(size, size)
+  -- The opacity (npciconalpha) goes on the texture: the frame's own alpha picks the copy of the name
+  -- shown (FollowBar), and the two multiply.
+  Method(frame.tex, "SetAlpha", Factor("npciconalpha"))
   frame:ClearAllPoints()
   frame:SetPoint("BOTTOM", anchor or uf, "TOP", 0, GAP)
   frame.role = role
@@ -2106,7 +2109,7 @@ local FACTOR_KINDS = {
   chevsize = true, textsize = true, othersize = true, barsize = true, buffsize = true, otherbarsize = true,
   hostilechevsize = true, hostilesize = true, friendchevsize = true, guildchevsize = true,
   memberoutlinesize = true, friendoutlinesize = true, guildoutlinesize = true, hostileoutlinesize = true,
-  npciconsize = true, npcsize = true, friendsize = true, guildsize = true,
+  npciconsize = true, npcsize = true, friendsize = true, guildsize = true, npciconalpha = true,
 }
 
 -- SetFactor sets one of FACTOR_KINDS from a number (the panel's slider) or a
@@ -2778,7 +2781,7 @@ local function BuildPanel()
   -- find widgets by creation order.
   content = pages.npcs.content
   local NPC_Y = -48
-  Group(L("services"), NPC_Y, 230)
+  Group(L("services"), NPC_Y, 270)
   local npcPlatesBox = Checkbox(L("npc_plates"), NPC_Y - 32, function(v)
     local ok, why = SetNpcPlates(v)
     if not ok then
@@ -2811,6 +2814,9 @@ local function BuildPanel()
       end
     end
   end, 260)
+  -- The role icon's opacity, below the icon size (created last: the specs find sliders by creation
+  -- order; the Friendly NPCs group is 270 high for it).
+  sliders[#sliders + 1] = { "npciconalpha", Slider(L("icon_alpha"), NPC_Y - 234, "npciconalpha") }
 
   -- Reads the saved settings into the controls.
   RefreshPanel = function()
@@ -2853,7 +2859,7 @@ local function BuildPanel()
   content = pages.quests.content
   ResetButton(-296, "quests")
   content = pages.npcs.content
-  ResetButton(-294, "npcs")
+  ResetButton(-334, "npcs")
 
   -- The GroupChevron category and its sub-categories. A client without sub-categories gets one
   -- category per page instead ("GroupChevron - <page>").
@@ -3327,11 +3333,11 @@ local function SlashStatus()
   end
   local plates = NpcPlates()
   Print(string.format("friendly NPCs: icons %s, compact %s, npcsize %s, npcnamegap %d, npciconsize %s, "
-    .. "friendly NPC nameplates %s, interaction soft target %s, %d role(s) learned, %d shipped, %d plate(s) "
-    .. "marked; %s",
+    .. "npciconalpha %s, friendly NPC nameplates %s, interaction soft target %s, %d role(s) learned, "
+    .. "%d shipped, %d plate(s) marked; %s",
     Flag("npcicons") and "on" or "off",
     Flag("npccompact") and "on" or "off", tostring(Factor("npcsize")), Gap("npcnamegap"),
-    tostring(Factor("npciconsize")),
+    tostring(Factor("npciconsize")), tostring(Factor("npciconalpha")),
     plates == nil and "unknown" or (plates and "on" or "off"),
     SoftInteract.Get() == nil and "unknown" or (SoftInteract.Get() and "on" or "off"), learned, shipped, services,
     ServiceText("target", "target")))
@@ -3354,7 +3360,7 @@ local function SlashStatus()
     .. " | othersize 1-3 | otherbarsize 1-3 | othernamegap -40-40 | level on|off | compact on|off | classcolor on|off"
     .. " | font default|outline|chat|large|game13"
     .. " | npcplates on|off | softinteract on|off | npcicons on|off | npccompact on|off | npcsize 1-3"
-    .. " | npcnamegap -40-40 | npciconsize 1-15"
+    .. " | npcnamegap -40-40 | npciconsize 1-15 | npciconalpha 0.1-1"
     .. " | icon [<role> <texture or atlas>|default]"
     .. " | reset | options | debug")
 end
@@ -3627,13 +3633,14 @@ local function Slash(msg)
     Print("colour " .. Core.FormatColor(r, g, b))
   elseif FACTOR_KINDS[cmd] then
     if arg == "" then
-      Print(string.format("%s %s (1 to %d, default %s)", cmd, tostring(Factor(cmd)), Core.MaxFactor(cmd),
-        tostring(Core.DefaultFactor(cmd))))
+      Print(string.format("%s %s (%s to %s, default %s)", cmd, tostring(Factor(cmd)),
+        tostring(Core.MinFactor(cmd)), tostring(Core.MaxFactor(cmd)), tostring(Core.DefaultFactor(cmd))))
       return
     end
     if not SetFactor(cmd, arg) then
-      Print(string.format("invalid %s %q: use a number from 1 to %d, e.g. /gchev %s 1.5; nothing changed", cmd,
-        arg, Core.MaxFactor(cmd), cmd))
+      Print(string.format("invalid %s %q: use a number from %s to %s, e.g. /gchev %s %s; nothing changed", cmd,
+        arg, tostring(Core.MinFactor(cmd)), tostring(Core.MaxFactor(cmd)), cmd,
+        Core.MaxFactor(cmd) > 1 and "1.5" or "0.5"))
       return
     end
     Print(string.format("%s %s", cmd, tostring(Factor(cmd))))
