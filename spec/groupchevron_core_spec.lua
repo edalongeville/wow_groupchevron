@@ -122,6 +122,12 @@ describe("GroupChevron Core", function()
       assert.are.equal(0, Core.NO_GAP)
       assert.are.equal(5, Core.DefaultGap("namegap"))
       assert.are.equal(5, Core.DefaultGap("othernamegap"))
+      -- Friendly NPCs: lower by default (their name sits in the faded health bar's place).
+      assert.are.equal(-20, Core.DEFAULT_NPC_GAP)
+      assert.are.equal(-20, Core.DefaultGap("npcnamegap"))
+      assert.are.equal(-20, Core.InitDB({}).npcnamegap)
+      assert.are.equal(-20, Core.InitDB({ npcnamegap = 41 }).npcnamegap)
+      assert.are.equal(3, Core.InitDB({ npcnamegap = 3 }).npcnamegap)
       assert.is_true(Core.GAP_KINDS.namegap)
       assert.is_true(Core.GAP_KINDS.othernamegap)
       for _, v in ipairs({ -40, -10, -1, 0, 4, 40 }) do

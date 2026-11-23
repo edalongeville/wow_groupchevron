@@ -3858,7 +3858,7 @@ describe("GroupChevron", function()
       showNPC(env, plate)
       env.slash("")
       assert.is_true(printedContains(env,
-        "friendly NPCs: icons on, compact on, npcsize 1, npcnamegap 5, npciconsize 5, friendly NPC nameplates on"))
+        "friendly NPCs: icons on, compact on, npcsize 1, npcnamegap -20, npciconsize 5, friendly NPC nameplates on"))
       assert.is_true(printedContains(env, "1 plate(s) marked"))
       env.world.target = "nameplate5"
       env.world.plates.target = plate
