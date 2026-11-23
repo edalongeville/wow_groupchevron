@@ -1491,25 +1491,27 @@ end
 -- api.UnitName(unit)). It returns kill, loot (the player's own), the source ("tooltip": at least
 -- one kind typed by the quest log; "guessed": kinds found, none of them typed by the log; "none":
 -- nothing, also when an API raises an error or returns a secret value; "missing": an API or a line
--- type does not exist on this client), partyKill and partyLoot.
+-- type does not exist on this client), partyKill, partyLoot and mineOpen (true when the tooltip
+-- lists at least one open objective of the player's own, typed or not: the unit is then tied to
+-- one of the player's quests, even when UnitIsRelatedToActiveQuest says no).
 function Core.QuestKindLookup(api, unit)
   if type(api) ~= "table" or type(api.GetTooltipUnit) ~= "function"
     or type(api.GetQuestObjectives) ~= "function" then
-    return false, false, "missing", false, false
+    return false, false, "missing", false, false, false
   end
   local types = api.TooltipLineTypes
   local tTitle = read(api, types, "QuestTitle")
   local tPlayer = read(api, types, "QuestPlayer")
   local tObjective = read(api, types, "QuestObjective")
   if tTitle == nil or tObjective == nil then
-    return false, false, "missing", false, false
+    return false, false, "missing", false, false, false
   end
   if type(unit) ~= "string" or unit == "" or isSecret(api, unit) then
-    return false, false, "none", false, false
+    return false, false, "none", false, false, false
   end
   local lines = read(api, call(api, "GetTooltipUnit", unit), "lines")
   if type(lines) ~= "table" then
-    return false, false, "none", false, false
+    return false, false, "none", false, false, false
   end
   local selfName = call(api, "UnitName", "player")
   if type(selfName) ~= "string" then
@@ -1521,7 +1523,7 @@ function Core.QuestKindLookup(api, unit)
   -- found.self / found.party: the kinds found for the player and for party members; logged: at
   -- least one of them typed by the quest log.
   local found = { self = {}, party = {} }
-  local logged = false
+  local logged, mineOpen = false, false
   -- quest: the current quest's ID (nil: none or unreadable); owner: whose objectives the lines
   -- are ("self", "party", or nil: nobody's).
   local quest, owner = nil, nil
@@ -1549,6 +1551,9 @@ function Core.QuestKindLookup(api, unit)
           owner = "party"
         end
       elseif kind == tObjective and owner and quest and Core.ObjectiveOpen(api, line) then
+        if owner == "self" then
+          mineOpen = true
+        end
         if objectives[quest] == nil then
           objectives[quest] = call(api, "GetQuestObjectives", quest) or false
         end
@@ -1574,7 +1579,7 @@ function Core.QuestKindLookup(api, unit)
   local mine, party = found.self, found.party
   local any = mine.kill or mine.loot or party.kill or party.loot
   local source = (any and logged and "tooltip") or (any and "guessed") or "none"
-  return mine.kill == true, mine.loot == true, source, party.kill == true, party.loot == true
+  return mine.kill == true, mine.loot == true, source, party.kill == true, party.loot == true, mineOpen
 end
 
 -- readRGB returns the r, g, b (numbers in 0..1, none secret) of a class colour c: a ColorMixin
@@ -1639,8 +1644,9 @@ end
 -- missing function, error or secret value). quest is true only for an attackable unit that
 -- QuestLookup says is tied to an active quest, and questSource is its source ("skipped" when the
 -- unit is not known to be attackable: the quest API is then not asked); for such a unit, questKill,
--- questLoot, questKindSource, partyKill and partyLoot are QuestKindLookup's answer (also asked for
--- a unit tied to a party member's quest; nil otherwise). partyQuest is true only
+-- questLoot, questKindSource, partyKill and partyLoot are QuestKindLookup's answer (asked for every
+-- attackable unit), and an open objective of the player's own in its tooltip also makes quest true
+-- (questSource "tooltip"), as UnitIsRelatedToActiveQuest does not cover every quest. partyQuest is true only
 -- for an attackable unit not tied to the player's own quests that PartyQuestLookup says is tied to
 -- a party member's open objective, and partyQuestSource is its source ("skipped" when the unit is
 -- not known to be attackable or is tied to the player's own quests). listed is true only when FriendLookup says
@@ -1676,12 +1682,16 @@ function Core.UnitInfo(api, unit, settings)
   end
   if info.attackable == true then
     info.quest, info.questSource = Core.QuestLookup(api, unit)
+    local mineOpen
+    info.questKill, info.questLoot, info.questKindSource, info.partyKill, info.partyLoot, mineOpen =
+      Core.QuestKindLookup(api, unit)
+    -- UnitIsRelatedToActiveQuest said no to a mob whose tooltip lists an open objective of the
+    -- player's (seen in game on WoW: Forever for an item to loot from it): the tooltip wins.
+    if info.quest ~= true and mineOpen == true then
+      info.quest, info.questSource = true, "tooltip"
+    end
     if info.quest ~= true then
       info.partyQuest, info.partyQuestSource = Core.PartyQuestLookup(api, unit)
-    end
-    if info.quest == true or info.partyQuest == true then
-      info.questKill, info.questLoot, info.questKindSource, info.partyKill, info.partyLoot =
-        Core.QuestKindLookup(api, unit)
     end
   end
   if Core.IsGroupMember(api, unit) then

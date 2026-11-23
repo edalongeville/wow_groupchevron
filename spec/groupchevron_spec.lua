@@ -3214,8 +3214,14 @@ describe("GroupChevron", function()
       assert.is_true(loot.shown)
       assert.are.equal(0, loot.points[1][4])
       assert.is_false(singleChevron(env, plate).shown)
-      -- No longer tied to a quest: nothing of ours.
+      -- UnitIsRelatedToActiveQuest says no but the tooltip still lists an open objective of the
+      -- player's (a cooking quest's ingredient, seen in game): still marked, from the tooltip.
       env.world.quests.nameplate2 = false
+      env.fire("NAME_PLATE_UNIT_ADDED", "nameplate2")
+      assert.is_true(frame.shown)
+      assert.is_true(loot.shown)
+      -- Neither any more: nothing of ours.
+      env.world.tooltips.nameplate2 = {}
       env.fire("NAME_PLATE_UNIT_ADDED", "nameplate2")
       assert.is_false(frame.shown)
       assert.is_false(printedContains(env, "error in"))

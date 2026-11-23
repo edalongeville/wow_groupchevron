@@ -3514,6 +3514,7 @@ end
 -- QUEST_SOURCE_NAMES are the sources of Core.QuestLookup, as /gchev prints them.
 local QUEST_SOURCE_NAMES = {
   unit = "UnitIsRelatedToActiveQuest",
+  tooltip = "an open objective of yours in the unit's tooltip",
   none = "none",
   missing = "API missing",
   skipped = "not asked: not known to be attackable",
