@@ -3221,6 +3221,73 @@ describe("GroupChevron", function()
       assert.is_false(printedContains(env, "error in"))
     end)
 
+    it("colours each icon by whose objective it is: the player's first, then the party's", function()
+      local env = load()
+      env.world.inGroup = true
+      local plate = newTreePlate("nameplate2")
+      -- Quest 7: kill the mob (the player's and the party member's); quest 8: loot from it.
+      env.world.objectives[7] = { { text = "Ogre slain: 1/5", type = "monster", finished = false } }
+      env.world.objectives[8] = { { text = "Ogre tooth: 0/3", type = "item", finished = false } }
+      local function tooltip(myKill, myLoot, theirKill, theirLoot)
+        local lines = {}
+        local function quest(id, text, me, them)
+          if me or them then
+            lines[#lines + 1] = { type = 17, leftText = "Q" .. id, id = id }
+          end
+          if me then
+            lines[#lines + 1] = { type = 18, leftText = "Me" }
+            lines[#lines + 1] = { type = 8, leftText = text }
+          end
+          if them then
+            lines[#lines + 1] = { type = 18, leftText = "Gonald" }
+            lines[#lines + 1] = { type = 8, leftText = text }
+          end
+        end
+        quest(7, "Ogre slain: 1/5", myKill, theirKill)
+        quest(8, "Ogre tooth: 0/3", myLoot, theirLoot)
+        env.world.tooltips.nameplate2 = lines
+      end
+      local function shown(mine)
+        env.world.plates.nameplate2 = plate
+        env.world.attackable.nameplate2, env.world.quests.nameplate2 = true, mine
+        env.fire("NAME_PLATE_UNIT_ADDED", "nameplate2")
+        local frame, kill, loot = questIcons(env, plate)
+        local function look(t)
+          return (t and t.shown) and hex(t.vertex) or "-"
+        end
+        return (frame and frame.shown) and (look(kill) .. " " .. look(loot)) or "chevron"
+      end
+      -- The player kills, a party member loots: a yellow sword, then a white sack.
+      tooltip(true, false, false, true)
+      assert.are.equal("#FFFF00 #FFFFFF", shown(true))
+      -- The other way round: still the sword at the left.
+      tooltip(false, true, true, false)
+      assert.are.equal("#FFFFFF #FFFF00", shown(true))
+      -- Both for both: the player's colour wins on each.
+      tooltip(true, true, true, true)
+      assert.are.equal("#FFFF00 #FFFF00", shown(true))
+      local _, kill, loot = questIcons(env, plate)
+      assert.is_true(kill.points[1][4] < loot.points[1][4])
+      -- Only a party member's quest (no quest of the player's on it): white icons.
+      tooltip(false, false, true, true)
+      assert.are.equal("#FFFFFF #FFFFFF", shown(false))
+      tooltip(false, false, false, true)
+      assert.are.equal("- #FFFFFF", shown(false))
+      -- The player's quest with nothing of the player's readable: the yellow chevron, even with a
+      -- party member's objective known.
+      env.world.tooltips.nameplate2 = {
+        { type = 17, leftText = "Q9", id = 9 }, { type = 18, leftText = "Me" },
+        { type = 8, leftText = "Use the totem: 0/1" },
+        { type = 18, leftText = "Gonald" }, { type = 8, leftText = "Ogre tooth: 0/3" },
+      }
+      env.world.objectives[9] = { { text = "Use the totem: 0/1", type = "event", finished = false } }
+      assert.are.equal("chevron", shown(true))
+      local single = singleChevron(env, plate)
+      assert.is_true(single.shown)
+      assert.are.equal("#FFFF00", hex(single.textures[1].vertex))
+      assert.is_false(printedContains(env, "error in"))
+    end)
+
     it("prints what is left to do to a quest hostile in /gchev debug", function()
       local env = load()
       local plate = newTreePlate("nameplate2")
@@ -3236,7 +3303,7 @@ describe("GroupChevron", function()
       env.world.tooltips.target = env.world.tooltips.nameplate2
       env.slash("debug")
       assert.is_true(printedContains(env, "quest hostile: yes"))
-      assert.is_true(printedContains(env, "kill yes, loot no (tooltip)"))
+      assert.is_true(printedContains(env, "kill yes, loot no, party kill no, party loot no (tooltip)"))
     end)
 
     -- untouched checks that nothing of ours is on the plate.
@@ -4356,9 +4423,9 @@ describe("GroupChevron", function()
             assert.are.equal(content, t.points[1][2], name)
           end
         end
-        -- A double chevron per section on the players' page; on the quest mobs page, the party
-        -- quest hostiles' single one (the quest hostiles show their kill and loot icons).
-        assert.are.equal(name == "Quest mobs" and count - 1 or 2 * count, vs, name)
+        -- A double chevron per section on the players' page; none on the quest mobs page, whose
+        -- two sections preview their kill and loot icons.
+        assert.are.equal(name == "Quest mobs" and 0 or 2 * count, vs, name)
       end
       local content = page(rec, "Quest mobs")
       local icons = {}
@@ -4370,9 +4437,10 @@ describe("GroupChevron", function()
           assert.is_true(t.shown ~= false)
         end
       end
-      assert.are.equal(2, #icons)
-      -- Side by side, kill first.
+      -- Two per section (quest hostiles, then party quest hostiles), side by side, kill first.
+      assert.are.equal(4, #icons)
       assert.is_true(icons[1].points[1][4] < icons[2].points[1][4])
+      assert.is_true(icons[3].points[1][4] < icons[4].points[1][4])
     end)
 
     it("falls back to one category per page without sub-categories", function()
@@ -4846,21 +4914,22 @@ describe("GroupChevron", function()
           end
         end
       end
-      -- Members, friends and guildmates: two "V"s of eight copies each; party quest hostiles: one
-      -- "V". The quest hostiles' preview shows their kill and loot icons instead (below).
-      assert.are.equal(3 * 16 + 8, #owned)
+      -- Members, friends and guildmates: two "V"s of eight copies each. The quest mobs' previews
+      -- show the kill and loot icons instead (below).
+      assert.are.equal(3 * 16, #owned)
       local content = page(rec, "Quest mobs")
       local hostile, kill = {}, nil
       for _, t in ipairs(content.textures) do
         if t.texture == "Interface\\AddOns\\GroupChevron\\quest_kill.tga" then
           if t.vertex and t.vertex[1] == 0 then
             hostile[#hostile + 1] = t
-          else
+          elseif not kill then
             kill = t
           end
         end
       end
-      assert.are.equal(8, #hostile)
+      -- The quest hostiles' sword (first) and the party quest hostiles': eight black copies each.
+      assert.are.equal(16, #hostile)
       assert.is_true(hostile[1].shown)
       -- Thickness 2 at size 1 (these specs): 0.1875 * 2 * 1 points to the right for the first copy.
       assert.are.equal(kill, hostile[1].points[1][2])

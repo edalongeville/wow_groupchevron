@@ -692,18 +692,19 @@ function QuestMarks.Get(plate, uf)
   return frame
 end
 
--- QuestMarks.Place lays out on parent (a plate's icon frame, or the options page) the icons of
--- the kinds that are true in which ({ kill = bool, loot = bool }), at size factor f with the
--- outline thickness factor thickness (0: none), in r, g, b; icons is { kill = icon, loot = icon }
--- as AddIcon builds them. The icons are anchored on anchorTo's anchorPoint at x, y (their bottom
--- left corner); nil anchorTo: parent's BOTTOMLEFT. It returns the width used (0: nothing shown).
-function QuestMarks.Place(icons, which, f, thickness, r, g, b, anchorTo, anchorPoint, x, y)
+-- QuestMarks.Place lays out the icons of the kinds which gives a colour to (which: { kill =
+-- { r, g, b } or nil, loot = ... }), each in its colour, side by side in a fixed order (kill
+-- first, at the left), at size factor f with the outline thickness factor thickness (0: none);
+-- icons is { kill = icon, loot = icon } as AddIcon builds them. The first icon's bottom left
+-- corner goes on anchorTo's anchorPoint at x, y. It returns the width used (0: nothing shown).
+function QuestMarks.Place(icons, which, f, thickness, anchorTo, anchorPoint, x, y)
   local w, h = QuestMarks.ICON_W * f, QuestMarks.ICON_H * f
   local offset = OUTLINE_UNIT * thickness * f
   local left = 0
   for _, kind in ipairs(QuestMarks.KINDS) do
     local icon = icons[kind]
-    local shown = icon ~= nil and which[kind] == true
+    local color = which[kind]
+    local shown = icon ~= nil and type(color) == "table"
     if icon then
       local parts = { icon.tex, icon.detail }
       for _, outline in ipairs(icon.outlines) do
@@ -720,7 +721,7 @@ function QuestMarks.Place(icons, which, f, thickness, r, g, b, anchorTo, anchorP
     end
     if shown then
       icon.tex:SetPoint("BOTTOMLEFT", anchorTo, anchorPoint, (x or 0) + left, y or 0)
-      icon.tex:SetVertexColor(r, g, b, 1)
+      icon.tex:SetVertexColor(color[1], color[2], color[3], 1)
       icon.tex:Show()
       if icon.detail then
         icon.detail:SetPoint("CENTER", icon.tex, "CENTER", 0, 0)
@@ -740,8 +741,36 @@ function QuestMarks.Place(icons, which, f, thickness, r, g, b, anchorTo, anchorP
   return left > 0 and left - QuestMarks.SPACING * f or 0
 end
 
--- QuestMarks.Show shows the quest icons of style (style.quest: { kill, loot }) on the plate, GAP
--- above anchor (else above uf), at the style's chevron size and outline, in its colour. It
+-- QuestMarks.Colors returns the colour of each icon a quest hostile shows ({ kill = { r, g, b }
+-- or nil, loot = ... }), or nil for the single chevron. The player's own objectives come first, in
+-- the hostile colour; a kind only a party member still has to do gets the party quest colour (a
+-- kill objective of the player's and a loot one of a party member's: a yellow sword and a white
+-- sack). party: the unit is tied to a party member's quest only (mode partyquest): its kinds, in
+-- the party quest colour. Without a kind of the player's own on a unit of the player's quests, the
+-- single chevron stays (the player's quest wins, even unknown).
+function QuestMarks.Colors(party, info)
+  if type(info) ~= "table" then
+    return nil
+  end
+  local mine = { HostileColor() }
+  local theirs = { PartyQuest.Color() }
+  local out = {}
+  if party then
+    out.kill = info.partyKill == true and theirs or nil
+    out.loot = info.partyLoot == true and theirs or nil
+  elseif info.questKill == true or info.questLoot == true then
+    out.kill = (info.questKill == true and mine) or (info.partyKill == true and theirs) or nil
+    out.loot = (info.questLoot == true and mine) or (info.partyLoot == true and theirs) or nil
+  end
+  if not out.kill and not out.loot then
+    return nil
+  end
+  return out
+end
+
+-- QuestMarks.Show shows the quest icons of style (style.quest: { kill = colour, loot = colour },
+-- see HostileStyle) on the plate, GAP above anchor (else above uf), at the style's chevron size
+-- and outline. It
 -- returns the frame, or nil (and hides it) when no icon can be shown: the caller then draws the
 -- single chevron.
 function QuestMarks.Show(plate, uf, anchor, style)
@@ -750,8 +779,7 @@ function QuestMarks.Show(plate, uf, anchor, style)
     return nil
   end
   local f = Factor(style.chevsize)
-  local width = QuestMarks.Place(frame.icons, style.quest, f, style.outlinesize or 0, style.r, style.g,
-    style.b, frame, "BOTTOMLEFT", 0, 0)
+  local width = QuestMarks.Place(frame.icons, style.quest, f, style.outlinesize or 0, frame, "BOTTOMLEFT", 0, 0)
   if width <= 0 then
     frame:Hide()
     return nil
@@ -1426,10 +1454,9 @@ end
 -- with our name in the hostile colour at hostilesize and hostilenamegap and a single chevron
 -- (hostilechevsize) in the same colour. With party (a unit tied to a party member's quest): the
 -- same look in the party quest colour at partyquestsize, partyquestnamegap and partyquestchevsize.
--- For the player's own quests, info (Core.UnitInfo) says what is left to do to the unit
--- (questKill, questLoot): the chevron then gives way to the kill and / or loot icons (QuestMarks),
--- at the same size, outline and colour; neither known (an object or event objective, an
--- unreadable tooltip, combat): the single chevron, as before.
+-- info (Core.UnitInfo) says what is left to do to the unit (QuestMarks.Colors): the chevron gives
+-- way to the kill and / or loot icons (QuestMarks) at the same size and outline; neither known (an
+-- object or event objective, an unreadable tooltip, combat): the single chevron, as before.
 local function HostileStyle(party, info)
   local prefix = party and "partyquest" or "hostile"
   local r, g, b
@@ -1442,8 +1469,7 @@ local function HostileStyle(party, info)
     kind = party and "partyquest" or "quest", r = r, g = g, b = b, chevron = true, single = true,
     size = Factor(prefix .. "size"), scales = false, gap = Gap(prefix .. "namegap"),
     outlinesize = Factor(prefix .. "outlinesize"), chevsize = prefix .. "chevsize",
-    quest = not party and type(info) == "table" and (info.questKill == true or info.questLoot == true)
-      and { kill = info.questKill == true, loot = info.questLoot == true } or nil,
+    quest = QuestMarks.Colors(party, info),
   }
 end
 
@@ -2046,7 +2072,7 @@ local function Apply(uf, unit, restore)
   elseif mode == "partyquest" then
     -- A hostile unit tied to a party member's quest: the same, in the party quest colour.
     Uncompact(uf)
-    Mark(uf, uf, HostileStyle(true))
+    Mark(uf, uf, HostileStyle(true, info))
   elseif mode == "npc" then
     -- A friendly NPC: "<name> (<level>)", its subtitle below, the role icon above when it has one
     -- (and npcicons is on); with npccompact, the health bar only while hurt, the target included.
@@ -2880,9 +2906,8 @@ local function BuildPanel()
     backdrop:SetPoint("TOPLEFT", page, "TOPLEFT", PREVIEW_X, squareTop)
     local quest = questIcons and { kill = QuestMarks.AddIcon(page, "kill"), loot = QuestMarks.AddIcon(page, "loot") }
     if quest and quest.kill and quest.loot then
-      local both = { kill = true, loot = true }
       local function UpdateIcons(kind, value)
-        local r, g, b = get()
+        local color = { get() }
         local thickness = kind == thicknessKind and value or Factor(thicknessKind)
         local f = kind == sizeKind and value or Factor(sizeKind)
         -- Both icons and the outline inside the square, with a 4-unit margin.
@@ -2890,7 +2915,7 @@ local function BuildPanel()
         f = math.min(f, fit, (PREVIEW_SIZE - 8) / QuestMarks.ICON_H)
         local w = (2 * QuestMarks.ICON_W + QuestMarks.SPACING) * f
         local h = QuestMarks.ICON_H * f
-        QuestMarks.Place(quest, both, f, thickness, r, g, b, page, "TOPLEFT",
+        QuestMarks.Place(quest, { kill = color, loot = color }, f, thickness, page, "TOPLEFT",
           PREVIEW_X + (PREVIEW_SIZE - w) / 2, squareTop - (PREVIEW_SIZE - h) / 2 - h)
       end
       previews[#previews + 1] = { thicknessKind = thicknessKind, sizeKind = sizeKind, update = UpdateIcons }
@@ -2978,13 +3003,13 @@ local function BuildPanel()
   Group(L("party_hostiles"), -290, 232)
   Label(L("name_colour"), 16, -330)
   local partyQuestFill = Swatch(-324, PartyQuest.Color, PartyQuest.SetColor, "partyquestcolor")
-  sliders[#sliders + 1] = { "partyquestchevsize", Slider(L("chevron_size"), -410, "partyquestchevsize") }
+  sliders[#sliders + 1] = { "partyquestchevsize", Slider(L("icon_size"), -410, "partyquestchevsize") }
   sliders[#sliders + 1] = { "partyquestsize", Slider(L("text_size"), -450, "partyquestsize") }
   sliders[#sliders + 1] = { "partyquestnamegap", Slider(L("name_gap"), -490, "partyquestnamegap") }
   sliders[#sliders + 1] = {
     "partyquestoutlinesize", Slider(L("outline_size"), -370, "partyquestoutlinesize", OUTLINE_GEOMETRY),
   }
-  Preview(-324, true, PartyQuest.Color, "partyquestoutlinesize", "partyquestchevsize")
+  Preview(-324, true, PartyQuest.Color, "partyquestoutlinesize", "partyquestchevsize", true)
 
   -- Name font: a drop-down listing Core.FONTS, beside the name colour of the group members.
   -- Without the client's UIDropDownMenu API it falls back to a button that cycles through them.
@@ -3517,8 +3542,9 @@ local function QuestText(unit, what)
   local info = Info(unit)
   local kinds = ""
   if info.questKindSource ~= nil then
-    kinds = string.format("; kill %s, loot %s (%s)", info.questKill and "yes" or "no",
-      info.questLoot and "yes" or "no", tostring(info.questKindSource))
+    kinds = string.format("; kill %s, loot %s, party kill %s, party loot %s (%s)", info.questKill and "yes" or "no",
+      info.questLoot and "yes" or "no", info.partyKill and "yes" or "no", info.partyLoot and "yes" or "no",
+      tostring(info.questKindSource))
   end
   return string.format("%s quest hostile: %s (%s, attackable %s)%s", what,
     Core.QuestHostile(info, ModeSettings()) and "yes" or "no",

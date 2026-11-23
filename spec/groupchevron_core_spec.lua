@@ -606,7 +606,7 @@ describe("GroupChevron Core", function()
       assert.is_nil(Core.ObjectiveType(api, { { text = "a", type = SECRET } }, "a"))
     end)
 
-    it("QuestKindLookup reads the player's own open objectives: kill, loot, both or neither", function()
+    it("QuestKindLookup reads the open objectives: the player's own and the party's, kill and loot", function()
       -- What the Forever client gave for a mob tied to three of the player's quests, in a group:
       -- the player's own name, then a party member's, under the first quest.
       local lines = {
@@ -628,33 +628,42 @@ describe("GroupChevron Core", function()
         return log[id]
       end
       local api = tooltipAPI(lines, { GetQuestObjectives = objectivesOf })
-      -- The item objectives are done: kill only.
-      assert.are.same({ true, false, "tooltip" }, { Core.QuestKindLookup(api, "nameplate1") })
+      -- The item objectives are done, the party member's kill one too: the player's kill only.
+      assert.are.same({ true, false, "tooltip", false, false }, { Core.QuestKindLookup(api, "nameplate1") })
       assert.are.equal(1, asked) -- only the quest with an open objective is looked up
-      -- One of them open again: both.
+      -- One of them open again: kill and loot.
       lines[9] = objective("Doigt de squelette : 4/10")
       log[101][1] = { text = "Doigt de squelette : 4/10", type = "item", finished = false }
-      assert.are.same({ true, true, "tooltip" }, { Core.QuestKindLookup(api, "nameplate1") })
-      -- A party member's open objective is never the player's.
+      assert.are.same({ true, true, "tooltip", false, false }, { Core.QuestKindLookup(api, "nameplate1") })
+      -- The party member still has kills to do on the same quest (counts differ from the player's:
+      -- matched without them): a party kill.
+      lines[6] = objective("Démon squelette : 9/15 personnages tués")
+      assert.are.same({ true, true, "tooltip", true, false }, { Core.QuestKindLookup(api, "nameplate1") })
+      -- A party member's open objective alone: party only, never the player's.
       api = tooltipAPI({ { type = 17, leftText = "Q", id = 5 }, who("Gonald"), objective("Crate: 0/4") },
+        { GetQuestObjectives = function() return { { text = "Crate: 2/4", type = "item" } } end })
+      assert.are.same({ false, false, "tooltip", false, true }, { Core.QuestKindLookup(api, "nameplate1") })
+      -- An unreadable player name: nobody's.
+      api = tooltipAPI({ { type = 17, leftText = "Q", id = 5 }, who(SECRET), objective("Crate: 0/4") },
         { GetQuestObjectives = function() return { { text = "Crate: 0/4", type = "item" } } end })
-      assert.are.same({ false, false, "none" }, { Core.QuestKindLookup(api, "nameplate1") })
+      assert.are.same({ false, false, "none", false, false }, { Core.QuestKindLookup(api, "nameplate1") })
       -- Other objective types count as neither.
       api = tooltipAPI({ { type = 17, leftText = "Q", id = 5 }, objective("Plan détruit : 0/1") },
         { GetQuestObjectives = function() return { { text = "Plan détruit : 0/1", type = "object" } } end })
-      assert.are.same({ false, false, "none" }, { Core.QuestKindLookup(api, "nameplate1") })
+      assert.are.same({ false, false, "none", false, false }, { Core.QuestKindLookup(api, "nameplate1") })
       -- A secret or missing quest ID: nothing is looked up.
       api = tooltipAPI({ { type = 17, leftText = "Q", id = SECRET }, objective("Crate: 0/4") },
         { GetQuestObjectives = function() error("never asked") end })
-      assert.are.same({ false, false, "none" }, { Core.QuestKindLookup(api, "nameplate1") })
+      assert.are.same({ false, false, "none", false, false }, { Core.QuestKindLookup(api, "nameplate1") })
       -- Missing APIs.
-      assert.are.same({ false, false, "missing" }, { Core.QuestKindLookup(tooltipAPI(lines), "nameplate1") })
-      assert.are.same({ false, false, "missing" },
+      assert.are.same({ false, false, "missing", false, false },
+        { Core.QuestKindLookup(tooltipAPI(lines), "nameplate1") })
+      assert.are.same({ false, false, "missing", false, false },
         { Core.QuestKindLookup(tooltipAPI(lines, { GetQuestObjectives = objectivesOf, TooltipLineTypes = false }),
           "nameplate1") })
       -- Errors are "none".
       api = tooltipAPI(lines, { GetQuestObjectives = function() error("boom") end })
-      assert.are.same({ false, false, "none" }, { Core.QuestKindLookup(api, "nameplate1") })
+      assert.are.same({ false, false, "none", false, false }, { Core.QuestKindLookup(api, "nameplate1") })
     end)
 
     it("ObjectiveOpen reads completed, else a n/m count", function()
