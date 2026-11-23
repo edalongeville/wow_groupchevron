@@ -1320,6 +1320,18 @@ function Core.ObjectiveOpen(api, line)
   return done ~= nil and total ~= nil and done < total
 end
 
+-- IsSelfName tells whether a QuestPlayer line's name (leftText) is the player's: the tooltip
+-- writes the full name ("Brom Boutefeu", with the last name WoW: Forever characters have) while
+-- UnitName("player") gives the first name only ("Brom"), so the name counts when it is selfName or
+-- starts with selfName and a space. Forever names are unique, so another player's full name never
+-- starts with the player's first name and a space.
+function Core.IsSelfName(name, selfName)
+  if type(name) ~= "string" or type(selfName) ~= "string" or selfName == "" then
+    return false
+  end
+  return name == selfName or name:sub(1, #selfName + 1) == selfName .. " "
+end
+
 -- PartyQuestLookup tells whether unit is tied to an objective a party member still has to do,
 -- read from the unit's tooltip data (api.GetTooltipUnit(unit), i.e. C_TooltipInfo.GetUnit: the
 -- same lines the game shows on the mouseover tooltip). Its lines are walked in order with the
@@ -1375,7 +1387,7 @@ function Core.PartyQuestLookup(api, unit)
         local name = read(api, line, "leftText")
         if type(name) ~= "string" or name == "" then
           owner = false
-        elseif name == selfName then
+        elseif Core.IsSelfName(name, selfName) then
           owner = nil
         else
           owner = name
@@ -1531,7 +1543,7 @@ function Core.QuestKindLookup(api, unit)
         local name = read(api, line, "leftText")
         if type(name) ~= "string" or name == "" then
           owner = nil
-        elseif name == selfName then
+        elseif Core.IsSelfName(name, selfName) then
           owner = "self"
         else
           owner = "party"

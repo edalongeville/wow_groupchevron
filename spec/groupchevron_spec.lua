@@ -3318,6 +3318,28 @@ describe("GroupChevron", function()
       assert.is_false(printedContains(env, "error in"))
     end)
 
+    it("shows the player's own objective in yellow when the tooltip writes the full name", function()
+      local env = load()
+      env.world.inGroup = true
+      local plate = newTreePlate("nameplate2")
+      -- The player "Me" is listed as "Me Boutefeu" (WoW: Forever's last names), next to Sara.
+      env.world.tooltips.nameplate2 = {
+        { type = 2, leftText = "Sanglier des rochers" },
+        { type = 17, leftText = "Côtes de sanglier à la bière", id = 384 },
+        { type = 18, leftText = "Me Boutefeu" }, { type = 8, leftText = "Côtes de sanglier des rochers : 0/6" },
+        { type = 18, leftText = "Sara Cetamol" }, { type = 8, leftText = "Côtes de sanglier des rochers : 0/6" },
+      }
+      env.world.objectives[384] = {
+        { text = "Côtes de sanglier des rochers : 0/6", type = "item", finished = false },
+      }
+      questHostile(env, plate)
+      local frame, kill, loot = questIcons(env, plate)
+      assert.is_true(frame.shown)
+      assert.is_true(loot.shown)
+      assert.are.equal("#FFFF00", hex(loot.vertex))
+      assert.is_true(kill == nil or not kill.shown)
+    end)
+
     it("prints what is left to do to a quest hostile in /gchev debug", function()
       local env = load()
       local plate = newTreePlate("nameplate2")

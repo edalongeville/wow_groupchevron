@@ -670,6 +670,34 @@ describe("GroupChevron Core", function()
       assert.are.same({ false, false, "none", false, false }, { Core.QuestKindLookup(api, "nameplate1") })
     end)
 
+    it("IsSelfName: the tooltip's full name (with the last name) is the player's", function()
+      assert.is_true(Core.IsSelfName("Brom", "Brom"))
+      assert.is_true(Core.IsSelfName("Brom Boutefeu", "Brom"))
+      assert.is_false(Core.IsSelfName("Bromwell", "Brom"))
+      assert.is_false(Core.IsSelfName("Sara Cetamol", "Brom"))
+      assert.is_false(Core.IsSelfName("Brom Boutefeu", nil))
+      assert.is_false(Core.IsSelfName(nil, "Brom"))
+    end)
+
+    it("QuestKindLookup: the player's full name in a group is the player's (Forever's last names)", function()
+      -- The lines of "Côtes de sanglier à la bière", the player Brom Boutefeu with Sara Cetamol.
+      local lines = {
+        { type = 2, leftText = "Sanglier des rochers" },
+        { type = 17, leftText = "Côtes de sanglier à la bière", id = 384 },
+        who("Me Boutefeu"), objective("Côtes de sanglier des rochers : 0/6"),
+        who("Sara Cetamol"), objective("Côtes de sanglier des rochers : 0/6"),
+      }
+      local api = tooltipAPI(lines, { GetQuestObjectives = function()
+        return { { text = "Côtes de sanglier des rochers : 0/6", type = "item", finished = false } }
+      end })
+      -- The player's loot (yellow), and Sara's too.
+      assert.are.same({ false, true, "tooltip", false, true }, { Core.QuestKindLookup(api, "nameplate1") })
+      -- PartyQuestLookup: Sara's objective is still a party member's.
+      assert.are.same({ true, "tooltip" }, { Core.PartyQuestLookup(api, "nameplate1") })
+      lines[5] = who("Me Boutefeu")
+      assert.are.same({ false, "none" }, { Core.PartyQuestLookup(api, "nameplate1") })
+    end)
+
     it("GuessKind: an objective naming the unit is a kill, any other one a loot", function()
       assert.are.equal("monster", Core.GuessKind("Petit sanglier des rochers : 3/8", "Petit sanglier des rochers"))
       assert.are.equal("monster", Core.GuessKind("Kobold Vermin slain: 3/10", "Kobold Vermin"))
