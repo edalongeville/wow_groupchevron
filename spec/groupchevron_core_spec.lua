@@ -681,14 +681,14 @@ describe("GroupChevron Core", function()
       assert.are.equal(7, #trace)
       assert.is_truthy(trace[1]:find("data readable", 1, true))
       assert.is_truthy(trace[1]:find('player name "Me"', 1, true))
-      assert.is_truthy(trace[3]:find('type 17, id 57, text "La couleur du Sang"', 1, true))
+      assert.is_truthy(trace[3]:find('type 17, id 57, completed none, text "La couleur du Sang"', 1, true))
       assert.is_truthy(trace[4]:find("(the player)", 1, true))
       assert.is_truthy(trace[5]:find("(open)", 1, true))
       assert.is_truthy(trace[6]:find("(other)", 1, true))
       assert.is_truthy(trace[7]:find("(not open)", 1, true))
       -- Secret fields are shown as such.
       trace = Core.QuestKindTrace(tooltipAPI({ { type = 17, leftText = SECRET, id = SECRET } }), "nameplate1")
-      assert.is_truthy(trace[2]:find("id secret, text secret", 1, true))
+      assert.is_truthy(trace[2]:find("id secret, completed none, text secret", 1, true))
       -- Nothing readable: the reason, in one line.
       assert.are.same({ "tooltip: GetUnit returned a secret value" },
         Core.QuestKindTrace(tooltipAPI(nil, { GetTooltipUnit = function() return SECRET end }), "nameplate1"))
@@ -699,6 +699,29 @@ describe("GroupChevron Core", function()
       assert.are.same({ "tooltip: C_TooltipInfo.GetUnit is missing" },
         Core.QuestKindTrace({}, "nameplate1"))
       assert.are.same({ "tooltip: unit token unreadable" }, Core.QuestKindTrace(tooltipAPI(lines), SECRET))
+    end)
+
+    it("QuestKindTrace and QuestLogSummary with a tooltip whose texts are secret", function()
+      local trace = Core.QuestKindTrace(tooltipAPI({ { type = 17, leftText = SECRET, id = SECRET },
+        { type = 18, leftText = SECRET }, { type = 8, leftText = SECRET } }), "nameplate1")
+      assert.is_truthy(trace[3]:find("(name unreadable)", 1, true))
+      assert.is_truthy(trace[4]:find("completed none", 1, true))
+      assert.is_truthy(trace[4]:find("(cannot tell)", 1, true))
+      local log = {
+        { questID = 1, isHeader = false }, { isHeader = true }, { questID = 2, isHeader = false },
+      }
+      local objectives = {
+        [1] = { { type = "item", finished = false }, { type = "monster", finished = true } },
+        [2] = { { type = "monster", finished = false }, { type = "object", finished = false } },
+      }
+      local api = tooltipAPI({}, {
+        GetNumQuestLogEntries = function() return #log end,
+        GetQuestLogInfo = function(i) return log[i] end,
+        GetQuestObjectives = function(id) return objectives[id] end,
+      })
+      assert.are.equal("quest log: 2 quest(s); unfinished objectives: 1 item, 1 monster, 1 other; 0 unreadable",
+        Core.QuestLogSummary(api))
+      assert.are.equal("quest log: API missing", Core.QuestLogSummary({}))
     end)
 
     it("IsSelfName: the tooltip's full name (with the last name) is the player's", function()

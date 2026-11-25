@@ -227,6 +227,9 @@ local unitAPI = {
   -- Kill or loot (the quest hostiles' icons): the type of the objectives the unit's tooltip lists,
   -- from the quest log; missing = the single chevron, as before.
   GetQuestObjectives = Field(C_QuestLog, "GetQuestObjectives"),
+  -- /gchev debug's quest log summary (Core.QuestLogSummary).
+  GetNumQuestLogEntries = Field(C_QuestLog, "GetNumQuestLogEntries"),
+  GetQuestLogInfo = Field(C_QuestLog, "GetInfo"),
   IsInGroup = IsInGroup,
   UnitName = UnitName,
   UnitGUID = UnitGUID,
@@ -3890,6 +3893,7 @@ local function SlashDebug(arg)
     for _, text in ipairs(Core.QuestKindTrace(unitAPI, unit)) do
       Print("debug: " .. text)
     end
+    Print("debug: " .. Core.QuestLogSummary(unitAPI))
   end
   Print("debug: " .. PartyQuest.Text(unit, "target"))
   ScaleDebug(plate, uf, fs0)

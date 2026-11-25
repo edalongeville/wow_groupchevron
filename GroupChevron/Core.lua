@@ -1644,16 +1644,73 @@ function Core.QuestKindTrace(api, unit)
       break
     end
     local kind, text, id = raw(line, "type"), raw(line, "leftText"), raw(line, "id")
+    local completed = raw(line, "completed")
     local note = ""
     if not isSecret(api, kind) and kind ~= nil and kind == tPlayer then
-      note = Core.IsSelfName(read(api, line, "leftText"), type(selfName) == "string" and selfName or nil)
-        and " (the player)" or " (other)"
+      if read(api, line, "leftText") == nil then
+        note = " (name unreadable)"
+      else
+        note = Core.IsSelfName(read(api, line, "leftText"), type(selfName) == "string" and selfName or nil)
+          and " (the player)" or " (other)"
+      end
     elseif not isSecret(api, kind) and kind ~= nil and kind == tObjective then
-      note = Core.ObjectiveOpen(api, line) and " (open)" or " (not open)"
+      if type(read(api, line, "completed")) ~= "boolean" and type(read(api, line, "leftText")) ~= "string" then
+        note = " (cannot tell)"
+      else
+        note = Core.ObjectiveOpen(api, line) and " (open)" or " (not open)"
+      end
     end
-    out[#out + 1] = string.format("  line %d: type %s, id %s, text %s%s", i, show(kind), show(id), show(text), note)
+    out[#out + 1] = string.format("  line %d: type %s, id %s, completed %s, text %s%s", i, show(kind), show(id),
+      show(completed), show(text), note)
   end
   return out
+end
+
+-- QuestLogSummary describes the player's quest log for /gchev debug: how many quests it holds and
+-- how many unfinished objectives of each type (item, monster, other), and how many could not be
+-- read (a secret value, an error). Diagnostic only, to see whether the quest log stays readable
+-- where the unit's tooltip does not (api.GetNumQuestLogEntries, api.GetQuestLogInfo,
+-- api.GetQuestObjectives).
+function Core.QuestLogSummary(api)
+  if type(api) ~= "table" or type(api.GetNumQuestLogEntries) ~= "function"
+    or type(api.GetQuestLogInfo) ~= "function" or type(api.GetQuestObjectives) ~= "function" then
+    return "quest log: API missing"
+  end
+  local n = call(api, "GetNumQuestLogEntries")
+  if type(n) ~= "number" then
+    return "quest log: entry count unreadable"
+  end
+  local quests, item, monster, other, unreadable = 0, 0, 0, 0, 0
+  for i = 1, n do
+    local info = call(api, "GetQuestLogInfo", i)
+    local header = read(api, info, "isHeader")
+    local id = read(api, info, "questID")
+    if type(info) == "table" and header == false and type(id) == "number" then
+      quests = quests + 1
+      local list = call(api, "GetQuestObjectives", id)
+      if type(list) ~= "table" then
+        unreadable = unreadable + 1
+      else
+        for j = 1, #list do
+          local o = list[j]
+          local finished, kind = read(api, o, "finished"), read(api, o, "type")
+          if finished == false then
+            if kind == "item" then
+              item = item + 1
+            elseif kind == "monster" then
+              monster = monster + 1
+            elseif kind == nil then
+              unreadable = unreadable + 1
+            else
+              other = other + 1
+            end
+          end
+        end
+      end
+    end
+  end
+  return string.format("quest log: %d quest(s); unfinished objectives: %d item, %d monster, %d other; %d unreadable",
+    quests, item, monster, other, unreadable)
 end
 
 -- readRGB returns the r, g, b (numbers in 0..1, none secret) of a class colour c: a ColorMixin
