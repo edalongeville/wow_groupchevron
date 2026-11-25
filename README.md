@@ -38,8 +38,10 @@ The addon is still being tested.
 Lua 5.1, as in the WoW client. Keep logic that does not need the WoW API in `Core.lua`, with tests in `spec/`.
 
 ```bash
-luacheck . && busted --lua=lua5.1 spec
+tools/check.sh
 ```
+
+`tools/check.sh` runs what the CI runs (the shipped NPC roles in their generated form, luacheck, then the busted specs) and installs the Lua tooling first with apt if it is missing (`--no-install` to only check). Without the script: `luacheck . && busted --lua=lua5.1 spec`.
 
 Regenerate the textures from the repository root:
 
