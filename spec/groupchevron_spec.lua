@@ -343,21 +343,37 @@ local function load(opts)
       fn()
     end
   end
-  -- chevron returns the chevron frame created on a plate's UnitFrame, if any.
-  env.chevron = function(plate)
-    for _, f in ipairs(frames) do
-      -- Not the quest hostiles' icon frame (quest_kill.tga, quest_loot.tga, quest_generic.tga).
-      local icons = false
-      for _, t in ipairs(f.textures) do
-        if type(t.texture) == "string" and t.texture:find("quest_", 1, true) then
-          icons = true
-        end
+  -- frameRole says what a frame the addon created is for, from its textures, never from where it
+  -- sits among the other frames (their order is an implementation detail):
+  --   "questicons"  the quest hostiles' kill / loot / generic icons (quest_*.tga),
+  --   "chevron"     a chevron (chevron.tga, or the rotated rectangles drawn when it cannot load),
+  --   nil           anything else.
+  env.frameRole = function(f)
+    local chevron = false
+    for _, t in ipairs(f.textures) do
+      if type(t.texture) == "string" and t.texture:find("quest_", 1, true) then
+        return "questicons"
       end
-      if f.parent == plate.UnitFrame and #f.textures > 0 and not icons then
-        return f
+      if t.color or t.texture == "Interface\\AddOns\\GroupChevron\\chevron.tga" then
+        chevron = true
       end
     end
-    return nil
+    return chevron and "chevron" or nil
+  end
+  -- framesOf returns the frames of the given role (see frameRole) created on a plate's UnitFrame, in
+  -- creation order.
+  env.framesOf = function(plate, role)
+    local out = {}
+    for _, f in ipairs(frames) do
+      if f.parent == plate.UnitFrame and env.frameRole(f) == role then
+        out[#out + 1] = f
+      end
+    end
+    return out
+  end
+  -- chevron returns the chevron frame created on a plate's UnitFrame, if any.
+  env.chevron = function(plate)
+    return env.framesOf(plate, "chevron")[1]
   end
   -- label returns the addon's full-name FontString on a plate, if any.
   env.label = function(plate)
@@ -3137,40 +3153,31 @@ describe("GroupChevron", function()
     -- questIcons returns the quest hostile icon frame of a plate and its kill, loot and generic
     -- (open book) textures (the coloured ones, not their black outline copies), if any.
     local function questIcons(env, plate)
-      for _, f in ipairs(env.frames) do
-        if f.parent == plate.UnitFrame then
-          local kill, loot, generic
-          for _, t in ipairs(f.textures) do
-            if t.vertex and t.vertex[1] ~= 0 then
-              if t.texture == "Interface\\AddOns\\GroupChevron\\quest_kill.tga" then
-                kill = t
-              elseif t.texture == "Interface\\AddOns\\GroupChevron\\quest_loot.tga" then
-                loot = t
-              elseif t.texture == "Interface\\AddOns\\GroupChevron\\quest_generic.tga" then
-                generic = t
-              end
-            end
-          end
-          if kill or loot or generic then
-            return f, kill, loot, generic
+      local f = env.framesOf(plate, "questicons")[1]
+      if not f then
+        return nil
+      end
+      local kill, loot, generic
+      for _, t in ipairs(f.textures) do
+        if t.vertex and t.vertex[1] ~= 0 then
+          if t.texture == "Interface\\AddOns\\GroupChevron\\quest_kill.tga" then
+            kill = t
+          elseif t.texture == "Interface\\AddOns\\GroupChevron\\quest_loot.tga" then
+            loot = t
+          elseif t.texture == "Interface\\AddOns\\GroupChevron\\quest_generic.tga" then
+            generic = t
           end
         end
+      end
+      if kill or loot or generic then
+        return f, kill, loot, generic
       end
       return nil
     end
 
-    -- singleChevron returns a plate's single chevron frame (its "V" texture), if any.
+    -- singleChevron returns a plate's chevron frame (its "V" texture), if any.
     local function singleChevron(env, plate)
-      for _, f in ipairs(env.frames) do
-        if f.parent == plate.UnitFrame then
-          for _, t in ipairs(f.textures) do
-            if t.texture == "Interface\\AddOns\\GroupChevron\\chevron.tga" then
-              return f
-            end
-          end
-        end
-      end
-      return nil
+      return env.chevron(plate)
     end
 
     it("shows the kill and loot icons in place of the single chevron, from the tooltip and the quest log", function()
@@ -3653,37 +3660,38 @@ describe("GroupChevron", function()
       local env = load()
       local plate = newTreePlate("nameplate2")
       local frames = function()
-        local out = {}
-        for _, f in ipairs(env.frames) do
-          -- The chevron frames, not the quest hostiles' icon frame.
-          local icons = false
-          for _, t in ipairs(f.textures) do
-            if type(t.texture) == "string" and t.texture:find("quest_", 1, true) then
-              icons = true
-            end
-          end
-          if f.parent == plate.UnitFrame and #f.textures > 0 and not icons then
-            out[#out + 1] = f
+        return env.framesOf(plate, "chevron")
+      end
+      -- double / single find the frame by its shape (two "V"s or one), not by creation order.
+      local function double()
+        for _, f in ipairs(frames()) do
+          if vcount(f) == 2 then
+            return f
           end
         end
-        return out
+      end
+      local function single()
+        for _, f in ipairs(frames()) do
+          if vcount(f) == 1 then
+            return f
+          end
+        end
       end
       -- A friend: the double chevron.
       env.world.plates.nameplate2 = plate
       env.world.players.nameplate2, env.world.friends.nameplate2, env.world.flist.nameplate2 = true, true, true
       env.fire("NAME_PLATE_UNIT_ADDED", "nameplate2")
       assert.are.equal(1, #frames())
-      assert.are.equal(2, vcount(frames()[1]))
-      assert.is_true(frames()[1].shown)
+      assert.is_true(double().shown)
+      assert.is_nil(single())
 
       -- The UnitFrame now shows a hostile quest unit: the single "V" only.
       env.world.players.nameplate2, env.world.friends.nameplate2, env.world.flist.nameplate2 = nil, nil, nil
       env.world.attackable.nameplate2, env.world.quests.nameplate2 = true, true
       env.fire("NAME_PLATE_UNIT_ADDED", "nameplate2")
       assert.are.equal(2, #frames())
-      assert.is_false(frames()[1].shown)
-      assert.is_true(frames()[2].shown)
-      assert.are.equal(1, vcount(frames()[2]))
+      assert.is_false(double().shown)
+      assert.is_true(single().shown)
       assert.are.equal("#FFFF00", hex(env.label(plate).color))
 
       -- And back to the friend: the double chevron again, the single one hidden.
@@ -3691,8 +3699,8 @@ describe("GroupChevron", function()
       env.world.players.nameplate2, env.world.friends.nameplate2, env.world.flist.nameplate2 = true, true, true
       env.fire("NAME_PLATE_UNIT_ADDED", "nameplate2")
       assert.are.equal(2, #frames())
-      assert.is_true(frames()[1].shown)
-      assert.is_false(frames()[2].shown)
+      assert.is_true(double().shown)
+      assert.is_false(single().shown)
       assert.are.equal("#3FA7FF", hex(env.label(plate).color))
     end)
 
