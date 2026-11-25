@@ -6,6 +6,9 @@ local WHITE = { 1, 1, 1, 1 }
 local NAMEPLATE_FONT = { name = "SystemFont_NamePlate" }
 -- textureMissing makes every SetTexture fail, as a client that cannot load the file.
 local textureMissing = false
+-- genericMissing makes the quest hostiles' generic icon (quest_generic.tga) fail to load, so that
+-- the specs of the single chevron still test it; the specs of the generic icon turn it off.
+local genericMissing = true
 local BLUE = { 0, 0.5, 1, 1 }
 
 local function newFontString(color, text)
@@ -46,6 +49,9 @@ local function newRegion()
   -- Textures: the chevron's "V"s (a file path; a "missing" path fails to load).
   function r:SetTexture(path)
     self.texture = path
+    if genericMissing and type(path) == "string" and path:find("quest_generic", 1, true) then
+      return false
+    end
     return not textureMissing
   end
   function r:SetVertexColor(cr, cg, cb, ca) self.vertex = { cr, cg, cb, ca } end
@@ -340,7 +346,14 @@ local function load(opts)
   -- chevron returns the chevron frame created on a plate's UnitFrame, if any.
   env.chevron = function(plate)
     for _, f in ipairs(frames) do
-      if f.parent == plate.UnitFrame and #f.textures > 0 then
+      -- Not the quest hostiles' icon frame (quest_kill.tga, quest_loot.tga, quest_generic.tga).
+      local icons = false
+      for _, t in ipairs(f.textures) do
+        if type(t.texture) == "string" and t.texture:find("quest_", 1, true) then
+          icons = true
+        end
+      end
+      if f.parent == plate.UnitFrame and #f.textures > 0 and not icons then
         return f
       end
     end
@@ -3121,23 +3134,25 @@ describe("GroupChevron", function()
       env.fire("NAME_PLATE_UNIT_ADDED", "nameplate2")
     end
 
-    -- questIcons returns the quest hostile icon frame of a plate and its kill and loot textures
-    -- (the coloured ones, not their black outline copies), if any.
+    -- questIcons returns the quest hostile icon frame of a plate and its kill, loot and generic
+    -- (open book) textures (the coloured ones, not their black outline copies), if any.
     local function questIcons(env, plate)
       for _, f in ipairs(env.frames) do
         if f.parent == plate.UnitFrame then
-          local kill, loot
+          local kill, loot, generic
           for _, t in ipairs(f.textures) do
             if t.vertex and t.vertex[1] ~= 0 then
               if t.texture == "Interface\\AddOns\\GroupChevron\\quest_kill.tga" then
                 kill = t
               elseif t.texture == "Interface\\AddOns\\GroupChevron\\quest_loot.tga" then
                 loot = t
+              elseif t.texture == "Interface\\AddOns\\GroupChevron\\quest_generic.tga" then
+                generic = t
               end
             end
           end
-          if kill or loot then
-            return f, kill, loot
+          if kill or loot or generic then
+            return f, kill, loot, generic
           end
         end
       end
@@ -3159,6 +3174,7 @@ describe("GroupChevron", function()
     end
 
     it("shows the kill and loot icons in place of the single chevron, from the tooltip and the quest log", function()
+      genericMissing = false
       local env = load()
       local plate = newTreePlate("nameplate2")
       -- The lines the Forever client gave for a quest mob (French client, solo).
@@ -3198,11 +3214,19 @@ describe("GroupChevron", function()
       assert.is_true(kill.shown)
       assert.is_false(loot.shown)
       assert.are.equal(0, kill.points[1][4])
-      -- Nothing known (an unreadable tooltip): the single chevron, as before.
+      -- Nothing known (an unreadable tooltip): the generic quest icon (an open book), in the hostile
+      -- colour, in place of the single chevron.
       env.world.tooltips.nameplate2 = {}
       env.fire("NAME_PLATE_UNIT_ADDED", "nameplate2")
-      assert.is_false(frame.shown)
-      assert.is_true(singleChevron(env, plate).shown)
+      assert.is_true(frame.shown)
+      local _, kill0, loot0, book = questIcons(env, plate)
+      assert.is_true(book.shown)
+      assert.are.equal("#FFFF00", hex(book.vertex))
+      assert.is_false(kill0.shown)
+      assert.is_false(loot0.shown)
+      assert.are.same({ 4.5, 9 }, { book.w, book.h })
+      local single0 = singleChevron(env, plate)
+      assert.is_true(single0 == nil or single0.shown == false)
       -- Loot only: the sack, and the chevron gives way again.
       env.world.tooltips.nameplate2 = {
         { type = 17, leftText = "Le Totem d'affliction", id = 101 },
@@ -3213,7 +3237,9 @@ describe("GroupChevron", function()
       assert.is_false(kill.shown)
       assert.is_true(loot.shown)
       assert.are.equal(0, loot.points[1][4])
-      assert.is_false(singleChevron(env, plate).shown)
+      assert.is_false(book.shown)
+      local single1 = singleChevron(env, plate)
+      assert.is_true(single1 == nil or single1.shown == false)
       -- UnitIsRelatedToActiveQuest says no but the tooltip still lists an open objective of the
       -- player's (a cooking quest's ingredient, seen in game): still marked, from the tooltip.
       env.world.quests.nameplate2 = false
@@ -3225,9 +3251,11 @@ describe("GroupChevron", function()
       env.fire("NAME_PLATE_UNIT_ADDED", "nameplate2")
       assert.is_false(frame.shown)
       assert.is_false(printedContains(env, "error in"))
+      genericMissing = true
     end)
 
     it("colours each icon by whose objective it is: the player's first, then the party's", function()
+      genericMissing = false
       local env = load()
       env.world.inGroup = true
       local plate = newTreePlate("nameplate2")
@@ -3257,9 +3285,12 @@ describe("GroupChevron", function()
         env.world.plates.nameplate2 = plate
         env.world.attackable.nameplate2, env.world.quests.nameplate2 = true, mine
         env.fire("NAME_PLATE_UNIT_ADDED", "nameplate2")
-        local frame, kill, loot = questIcons(env, plate)
+        local frame, kill, loot, book = questIcons(env, plate)
         local function look(t)
           return (t and t.shown) and hex(t.vertex) or "-"
+        end
+        if book and book.shown then
+          return "book " .. look(book)
         end
         return (frame and frame.shown) and (look(kill) .. " " .. look(loot)) or "chevron"
       end
@@ -3279,7 +3310,14 @@ describe("GroupChevron", function()
       assert.are.equal("#FFFFFF #FFFFFF", shown(false))
       tooltip(false, false, false, true)
       assert.are.equal("- #FFFFFF", shown(false))
-      -- The player's quest with nothing of the player's readable: the yellow chevron, even with a
+      -- A party member's quest whose objective is neither a kill nor a loot: the white book.
+      env.world.tooltips.nameplate2 = {
+        { type = 17, leftText = "Q10", id = 10 }, { type = 18, leftText = "Gonald" },
+        { type = 8, leftText = "Use the totem: 0/1" },
+      }
+      env.world.objectives[10] = { { text = "Use the totem: 0/1", type = "event", finished = false } }
+      assert.are.equal("book #FFFFFF", shown(false))
+      -- The player's quest with nothing of the player's readable: the yellow book, even with a
       -- party member's objective known.
       env.world.tooltips.nameplate2 = {
         { type = 17, leftText = "Q9", id = 9 }, { type = 18, leftText = "Me" },
@@ -3287,11 +3325,11 @@ describe("GroupChevron", function()
         { type = 18, leftText = "Gonald" }, { type = 8, leftText = "Ogre tooth: 0/3" },
       }
       env.world.objectives[9] = { { text = "Use the totem: 0/1", type = "event", finished = false } }
-      assert.are.equal("chevron", shown(true))
+      assert.are.equal("book #FFFF00", shown(true))
       local single = singleChevron(env, plate)
-      assert.is_true(single.shown)
-      assert.are.equal("#FFFF00", hex(single.textures[1].vertex))
+      assert.is_true(single == nil or single.shown == false)
       assert.is_false(printedContains(env, "error in"))
+      genericMissing = true
     end)
 
     it("shows a party member's icons even for a quest the player does not have", function()
@@ -3617,7 +3655,14 @@ describe("GroupChevron", function()
       local frames = function()
         local out = {}
         for _, f in ipairs(env.frames) do
-          if f.parent == plate.UnitFrame and #f.textures > 0 then
+          -- The chevron frames, not the quest hostiles' icon frame.
+          local icons = false
+          for _, t in ipairs(f.textures) do
+            if type(t.texture) == "string" and t.texture:find("quest_", 1, true) then
+              icons = true
+            end
+          end
+          if f.parent == plate.UnitFrame and #f.textures > 0 and not icons then
             out[#out + 1] = f
           end
         end

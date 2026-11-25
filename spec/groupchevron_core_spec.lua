@@ -670,6 +670,88 @@ describe("GroupChevron Core", function()
       assert.are.same({ false, false, "none", false, false, true }, { Core.QuestKindLookup(api, "nameplate1") })
     end)
 
+    it("QuestKindTrace says what the tooltip gave, and what could not be read", function()
+      local lines = {
+        { type = 2, leftText = "Captif défias" },
+        { type = 17, leftText = "La couleur du Sang", id = 57 },
+        who("Me Boutefeu"), objective("Foulard en laine rouge : 0/10"),
+        who("Gonald"), objective("Foulard en laine rouge : 1/10", true),
+      }
+      local trace = Core.QuestKindTrace(tooltipAPI(lines), "nameplate1")
+      assert.are.equal(7, #trace)
+      assert.is_truthy(trace[1]:find("data readable", 1, true))
+      assert.is_truthy(trace[1]:find('player name "Me"', 1, true))
+      assert.is_truthy(trace[3]:find('type 17, id 57, completed none, text "La couleur du Sang"', 1, true))
+      assert.is_truthy(trace[4]:find("(the player)", 1, true))
+      assert.is_truthy(trace[5]:find("(open)", 1, true))
+      assert.is_truthy(trace[6]:find("(other)", 1, true))
+      assert.is_truthy(trace[7]:find("(not open)", 1, true))
+      -- Secret fields are shown as such.
+      trace = Core.QuestKindTrace(tooltipAPI({ { type = 17, leftText = SECRET, id = SECRET } }), "nameplate1")
+      assert.is_truthy(trace[2]:find("id secret, completed none, text secret", 1, true))
+      -- Nothing readable: the reason, in one line.
+      assert.are.same({ "tooltip: GetUnit returned a secret value" },
+        Core.QuestKindTrace(tooltipAPI(nil, { GetTooltipUnit = function() return SECRET end }), "nameplate1"))
+      assert.are.same({ "tooltip: data.lines is secret" },
+        Core.QuestKindTrace(tooltipAPI(SECRET), "nameplate1"))
+      assert.are.same({ "tooltip: GetUnit raised an error: boom" },
+        Core.QuestKindTrace(tooltipAPI(nil, { GetTooltipUnit = function() error("boom", 0) end }), "nameplate1"))
+      assert.are.same({ "tooltip: C_TooltipInfo.GetUnit is missing" },
+        Core.QuestKindTrace({}, "nameplate1"))
+      assert.are.same({ "tooltip: unit token unreadable" }, Core.QuestKindTrace(tooltipAPI(lines), SECRET))
+    end)
+
+    it("QuestKindTrace and QuestLogSummary with a tooltip whose texts are secret", function()
+      local trace = Core.QuestKindTrace(tooltipAPI({ { type = 17, leftText = SECRET, id = SECRET },
+        { type = 18, leftText = SECRET }, { type = 8, leftText = SECRET } }), "nameplate1")
+      assert.is_truthy(trace[3]:find("(name unreadable)", 1, true))
+      assert.is_truthy(trace[4]:find("completed none", 1, true))
+      assert.is_truthy(trace[4]:find("(cannot tell)", 1, true))
+      local log = {
+        { questID = 1, isHeader = false }, { isHeader = true }, { questID = 2, isHeader = false },
+      }
+      local objectives = {
+        [1] = { { type = "item", finished = false }, { type = "monster", finished = true } },
+        [2] = { { type = "monster", finished = false }, { type = "object", finished = false } },
+      }
+      local api = tooltipAPI({}, {
+        GetNumQuestLogEntries = function() return #log end,
+        GetQuestLogInfo = function(i) return log[i] end,
+        GetQuestObjectives = function(id) return objectives[id] end,
+      })
+      -- No isOnMap flag: the whole log is counted, the on-map part is unreadable.
+      assert.are.equal("quest log: 2 quest(s); unfinished objectives: 1 item, 1 monster, 1 other, 0 unreadable;"
+        .. " on the map: 0 quest(s), 0 item, 0 monster, 0 other, 2 unreadable", Core.QuestLogSummary(api))
+      assert.are.equal("quest log: API missing or entry count unreadable", Core.QuestLogSummary({}))
+      -- The guess: secret objective texts and on-map objectives of one type only.
+      local secretTip = { { type = 17, leftText = SECRET, id = SECRET }, { type = 8, leftText = SECRET } }
+      log[1].isOnMap, log[3].isOnMap = true, false
+      objectives[1] = { { type = "item", finished = false }, { type = "item", finished = true } }
+      api = tooltipAPI(secretTip, {
+        GetNumQuestLogEntries = function() return #log end,
+        GetQuestLogInfo = function(i) return log[i] end,
+        GetQuestObjectives = function(id) return objectives[id] end,
+      })
+      assert.are.equal("item", Core.QuestLogGuess(api, "nameplate1"))
+      -- A kill objective on the map too: a mix, no guess.
+      log[3].isOnMap = true
+      objectives[2] = { { type = "monster", finished = false } }
+      assert.is_nil(Core.QuestLogGuess(api, "nameplate1"))
+      log[1].isOnMap = false
+      assert.are.equal("monster", Core.QuestLogGuess(api, "nameplate1"))
+      -- Another type on the map: no guess.
+      objectives[2] = { { type = "monster", finished = false }, { type = "object", finished = false } }
+      assert.is_nil(Core.QuestLogGuess(api, "nameplate1"))
+      -- A readable tooltip is never guessed.
+      objectives[2] = { { type = "monster", finished = false } }
+      local readable = tooltipAPI({ { type = 17, leftText = "Q", id = 5 }, { type = 8, leftText = "x : 0/1" } }, {
+        GetNumQuestLogEntries = function() return #log end,
+        GetQuestLogInfo = function(i) return log[i] end,
+        GetQuestObjectives = function(id) return objectives[id] end,
+      })
+      assert.is_nil(Core.QuestLogGuess(readable, "nameplate1"))
+    end)
+
     it("IsSelfName: the tooltip's full name (with the last name) is the player's", function()
       assert.is_true(Core.IsSelfName("Brom", "Brom"))
       assert.is_true(Core.IsSelfName("Brom Boutefeu", "Brom"))
