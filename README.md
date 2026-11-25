@@ -26,7 +26,7 @@ The addon is still being tested.
 
 | Path | Content |
 |---|---|
-| `GroupChevron/` | the addon: `Core.lua` (pure, unit-tested logic), `GroupChevron.lua` (WoW glue), `.toc`, `chevron.tga`, `icon.tga` |
+| `GroupChevron/` | the addon: `Core.lua` (pure, unit-tested logic), `QuestMarks.lua` (the quest hostiles' icons, its dependencies injected), `GroupChevron.lua` (WoW glue), `.toc`, `chevron.tga`, `icon.tga`, `quest_*.tga` |
 | `assets/` | CurseForge project icon (`curseforge-icon.png`, 400×400) |
 | `docs/` | implementation notes |
 | `spec/` | [busted](https://lunarmodules.github.io/busted/) tests (`Core.lua` and a smoke test of the glue against a stubbed WoW API) |
