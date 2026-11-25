@@ -3,6 +3,8 @@
   GroupChevron/quest_kill.tga         a diagonal sword above a small chevron ("kill this mob")
   GroupChevron/quest_loot.tga         a sack above a small chevron ("loot a quest item from it")
   GroupChevron/quest_loot_detail.tga  the sack's tie, drawn in black over quest_loot.tga
+  GroupChevron/quest_generic.tga      an open book above a small chevron ("tied to a quest", kind unknown)
+  GroupChevron/quest_generic_detail.tga  the book's spine, drawn in black over quest_generic.tga
 
 The black outline is not in the textures: like the chevron's, it is drawn in game from black copies
 of the icon moved in eight directions (hostileoutlinesize). Shapes are on the 24x24 grid of the
@@ -129,6 +131,32 @@ def loot_detail():
     return s
 
 
+BOOK = 0.8  # the book is drawn at 80 % around the centre of its 24 x 24 box, so it is not wider than the sack
+
+
+def book_xy(x, y):
+    return 12 + (x - 12) * BOOK, 12 + (y - 12) * BOOK
+
+
+def generic():
+    s = Shape()
+    cmds = [("M", 12, 6), ("C", 9, 4, 5, 4, 2.5, 5), ("L", 2.5, 19), ("C", 5, 18, 9, 18, 12, 20),
+            ("C", 15, 18, 19, 18, 21.5, 19), ("L", 21.5, 5), ("C", 19, 4, 15, 4, 12, 6)]
+    scaled = []
+    for c in cmds:
+        pts = [book_xy(c[i], c[i + 1]) for i in range(1, len(c), 2)]
+        scaled.append((c[0],) + tuple(v for p in pts for v in p))
+    s.poly(path(scaled))
+    chevron(s)
+    return s
+
+
+def generic_detail():
+    s = Shape()
+    s.stroke([book_xy(12, 6.5), book_xy(12, 19.5)], 1.2 * BOOK)
+    return s
+
+
 def write(path_out, shape):
     rows = []
     for y in range(H):
@@ -154,3 +182,5 @@ if __name__ == "__main__":
     write(os.path.join(out, "quest_kill.tga"), kill())
     write(os.path.join(out, "quest_loot.tga"), loot())
     write(os.path.join(out, "quest_loot_detail.tga"), loot_detail())
+    write(os.path.join(out, "quest_generic.tga"), generic())
+    write(os.path.join(out, "quest_generic_detail.tga"), generic_detail())

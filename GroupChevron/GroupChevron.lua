@@ -622,12 +622,16 @@ end
 -- per plate (frames), a child of its UnitFrame like the chevron.
 local QuestMarks = {
   frames = setmetatable({}, { __mode = "k" }),
-  KINDS = { "kill", "loot" },
+  KINDS = { "kill", "loot", "generic" },
   TEXTURES = {
     kill = "Interface\\AddOns\\GroupChevron\\quest_kill.tga",
     loot = "Interface\\AddOns\\GroupChevron\\quest_loot.tga",
+    generic = "Interface\\AddOns\\GroupChevron\\quest_generic.tga",
   },
-  DETAILS = { loot = "Interface\\AddOns\\GroupChevron\\quest_loot_detail.tga" },
+  DETAILS = {
+    loot = "Interface\\AddOns\\GroupChevron\\quest_loot_detail.tga",
+    generic = "Interface\\AddOns\\GroupChevron\\quest_generic_detail.tga",
+  },
   ICON_W = 4.5,
   ICON_H = 9,
   SPACING = 0.5,
@@ -686,7 +690,7 @@ function QuestMarks.Get(plate, uf)
   for _, kind in ipairs(QuestMarks.KINDS) do
     frame.icons[kind] = QuestMarks.AddIcon(frame, kind)
   end
-  if not (frame.icons.kill and frame.icons.loot) then
+  if not (frame.icons.kill and frame.icons.loot and frame.icons.generic) then
     NoticeOnce("noquesticon", "quest icon textures not found (restart the game after an update): "
       .. "the single chevron is shown instead")
   end
@@ -745,12 +749,13 @@ function QuestMarks.Place(icons, which, f, thickness, anchorTo, anchorPoint, x, 
 end
 
 -- QuestMarks.Colors returns the colour of each icon a quest hostile shows ({ kill = { r, g, b }
--- or nil, loot = ... }), or nil for the single chevron. The player's own objectives come first, in
--- the hostile colour; a kind only a party member still has to do gets the party quest colour (a
--- kill objective of the player's and a loot one of a party member's: a yellow sword and a white
--- sack). party: the unit is tied to a party member's quest only (mode partyquest): its kinds, in
--- the party quest colour. Without a kind of the player's own on a unit of the player's quests, the
--- single chevron stays (the player's quest wins, even unknown).
+-- or nil, loot = ..., generic = ... }), or nil for the single chevron (no info). The player's own
+-- objectives come first, in the hostile colour; a kind only a party member still has to do gets the
+-- party quest colour (a kill objective of the player's and a loot one of a party member's: a yellow
+-- sword and a white sack). party: the unit is tied to a party member's quest only (mode
+-- partyquest): its kinds, in the party quest colour. When no kind is known (an object or event
+-- objective, an unreadable tooltip), the generic quest icon, an open book, in the hostile colour
+-- (yellow) or, for a party quest, the party quest colour (white).
 function QuestMarks.Colors(party, info)
   if type(info) ~= "table" then
     return nil
@@ -766,7 +771,9 @@ function QuestMarks.Colors(party, info)
     out.loot = (info.questLoot == true and mine) or (info.partyLoot == true and theirs) or nil
   end
   if not out.kill and not out.loot then
-    return nil
+    -- Tied to a quest, but nothing told whether to kill or loot (an object or event objective, an
+    -- unreadable tooltip as in dungeons): the generic quest icon, the player's colour first.
+    out.generic = party and theirs or mine
   end
   return out
 end
@@ -1459,7 +1466,8 @@ end
 -- same look in the party quest colour at partyquestsize, partyquestnamegap and partyquestchevsize.
 -- info (Core.UnitInfo) says what is left to do to the unit (QuestMarks.Colors): the chevron gives
 -- way to the kill and / or loot icons (QuestMarks) at the same size and outline; neither known (an
--- object or event objective, an unreadable tooltip, combat): the single chevron, as before.
+-- object or event objective, an unreadable tooltip, combat): the generic quest icon (an open book);
+-- the single chevron only when the icon textures cannot be loaded.
 local function HostileStyle(party, info)
   local prefix = party and "partyquest" or "hostile"
   local r, g, b
