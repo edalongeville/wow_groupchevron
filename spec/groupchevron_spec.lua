@@ -316,7 +316,8 @@ local function load(opts)
   setmetatable(env, { __index = _G })
 
   local ns = {}
-  for _, file in ipairs({ "GroupChevron/NpcRoles.lua", "GroupChevron/Core.lua", "GroupChevron/GroupChevron.lua" }) do
+  for _, file in ipairs({ "GroupChevron/NpcRoles.lua", "GroupChevron/Core.lua", "GroupChevron/QuestMarks.lua",
+    "GroupChevron/GroupChevron.lua" }) do
     local chunk = assert(loadfile(file))
     setfenv(chunk, env)
     chunk("GroupChevron", ns)
