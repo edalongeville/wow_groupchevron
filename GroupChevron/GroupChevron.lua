@@ -3884,6 +3884,13 @@ local function SlashDebug(arg)
   Print("debug: " .. FriendText(unit, "target"))
   Print("debug: " .. GuildText(unit, "target"))
   Print("debug: " .. QuestText(unit, "target"))
+  -- A quest hostile whose icons could not be told (single chevron): say what its tooltip gave.
+  local questInfo = Info(unit)
+  if questInfo.questKindSource == "none" or questInfo.questKindSource == "missing" then
+    for _, text in ipairs(Core.QuestKindTrace(unitAPI, unit)) do
+      Print("debug: " .. text)
+    end
+  end
   Print("debug: " .. PartyQuest.Text(unit, "target"))
   ScaleDebug(plate, uf, fs0)
   Print("debug: " .. ServiceText(unit, "target"))

@@ -670,6 +670,37 @@ describe("GroupChevron Core", function()
       assert.are.same({ false, false, "none", false, false, true }, { Core.QuestKindLookup(api, "nameplate1") })
     end)
 
+    it("QuestKindTrace says what the tooltip gave, and what could not be read", function()
+      local lines = {
+        { type = 2, leftText = "Captif défias" },
+        { type = 17, leftText = "La couleur du Sang", id = 57 },
+        who("Me Boutefeu"), objective("Foulard en laine rouge : 0/10"),
+        who("Gonald"), objective("Foulard en laine rouge : 1/10", true),
+      }
+      local trace = Core.QuestKindTrace(tooltipAPI(lines), "nameplate1")
+      assert.are.equal(7, #trace)
+      assert.is_truthy(trace[1]:find("data readable", 1, true))
+      assert.is_truthy(trace[1]:find('player name "Me"', 1, true))
+      assert.is_truthy(trace[3]:find('type 17, id 57, text "La couleur du Sang"', 1, true))
+      assert.is_truthy(trace[4]:find("(the player)", 1, true))
+      assert.is_truthy(trace[5]:find("(open)", 1, true))
+      assert.is_truthy(trace[6]:find("(other)", 1, true))
+      assert.is_truthy(trace[7]:find("(not open)", 1, true))
+      -- Secret fields are shown as such.
+      trace = Core.QuestKindTrace(tooltipAPI({ { type = 17, leftText = SECRET, id = SECRET } }), "nameplate1")
+      assert.is_truthy(trace[2]:find("id secret, text secret", 1, true))
+      -- Nothing readable: the reason, in one line.
+      assert.are.same({ "tooltip: GetUnit returned a secret value" },
+        Core.QuestKindTrace(tooltipAPI(nil, { GetTooltipUnit = function() return SECRET end }), "nameplate1"))
+      assert.are.same({ "tooltip: data.lines is secret" },
+        Core.QuestKindTrace(tooltipAPI(SECRET), "nameplate1"))
+      assert.are.same({ "tooltip: GetUnit raised an error: boom" },
+        Core.QuestKindTrace(tooltipAPI(nil, { GetTooltipUnit = function() error("boom", 0) end }), "nameplate1"))
+      assert.are.same({ "tooltip: C_TooltipInfo.GetUnit is missing" },
+        Core.QuestKindTrace({}, "nameplate1"))
+      assert.are.same({ "tooltip: unit token unreadable" }, Core.QuestKindTrace(tooltipAPI(lines), SECRET))
+    end)
+
     it("IsSelfName: the tooltip's full name (with the last name) is the player's", function()
       assert.is_true(Core.IsSelfName("Brom", "Brom"))
       assert.is_true(Core.IsSelfName("Brom Boutefeu", "Brom"))

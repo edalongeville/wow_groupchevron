@@ -1582,6 +1582,80 @@ function Core.QuestKindLookup(api, unit)
   return mine.kill == true, mine.loot == true, source, party.kill == true, party.loot == true, mineOpen
 end
 
+-- QuestKindTrace explains an answer of QuestKindLookup for /gchev debug: it returns a list of
+-- strings saying what the client gave for unit's tooltip data and what could not be read (a
+-- secret value, an error, a missing field), line by line (at most 14 lines). Diagnostic only: it
+-- never changes what QuestKindLookup answers. Text fields are shown when readable, "secret" when
+-- the client marks them so, "none" when absent.
+function Core.QuestKindTrace(api, unit)
+  local out = {}
+  local function show(v)
+    if type(api) == "table" and isSecret(api, v) then
+      return "secret"
+    elseif v == nil then
+      return "none"
+    elseif type(v) == "string" then
+      return string.format("%q", v)
+    end
+    return tostring(v)
+  end
+  if type(api) ~= "table" or type(api.GetTooltipUnit) ~= "function" then
+    return { "tooltip: C_TooltipInfo.GetUnit is missing" }
+  end
+  if type(unit) ~= "string" or unit == "" or isSecret(api, unit) then
+    return { "tooltip: unit token unreadable" }
+  end
+  local ok, data = pcall(api.GetTooltipUnit, unit)
+  if not ok then
+    return { "tooltip: GetUnit raised an error: " .. tostring(data) }
+  end
+  if isSecret(api, data) then
+    return { "tooltip: GetUnit returned a secret value" }
+  end
+  if type(data) ~= "table" then
+    return { "tooltip: GetUnit returned " .. type(data) }
+  end
+  -- raw reads t[key] under pcall and keeps a secret value, to say that it is one.
+  local function raw(t, key)
+    local rok, v = pcall(function() return t[key] end)
+    if rok then
+      return v
+    end
+    return nil
+  end
+  local lines = raw(data, "lines")
+  if isSecret(api, lines) or type(lines) ~= "table" then
+    out[#out + 1] = "tooltip: data.lines is " .. (isSecret(api, lines) and "secret" or lines == nil and "missing"
+      or type(lines))
+    return out
+  end
+  local types = api.TooltipLineTypes
+  local tTitle, tPlayer, tObjective = read(api, types, "QuestTitle"), read(api, types, "QuestPlayer"),
+    read(api, types, "QuestObjective")
+  local selfName = call(api, "UnitName", "player")
+  out[#out + 1] = string.format("tooltip: data readable; QuestTitle/QuestPlayer/QuestObjective types %s/%s/%s; "
+    .. "player name %s", show(tTitle), show(tPlayer), show(tObjective), show(selfName))
+  for i = 1, 14 do
+    local line = raw(lines, i)
+    if line == nil or isSecret(api, line) then
+      if i == 1 then
+        out[#out + 1] = "tooltip: " .. (line == nil and "no line" or "the first line is secret")
+      end
+      break
+    end
+    local kind, text, id = raw(line, "type"), raw(line, "leftText"), raw(line, "id")
+    local note = ""
+    if not isSecret(api, kind) and kind ~= nil and kind == tPlayer then
+      note = Core.IsSelfName(read(api, line, "leftText"), type(selfName) == "string" and selfName or nil)
+        and " (the player)" or " (other)"
+    elseif not isSecret(api, kind) and kind ~= nil and kind == tObjective then
+      note = Core.ObjectiveOpen(api, line) and " (open)" or " (not open)"
+    end
+    out[#out + 1] = string.format("  line %d: type %s, id %s, text %s%s", i, show(kind), show(id), show(text), note)
+  end
+  return out
+end
+
 -- readRGB returns the r, g, b (numbers in 0..1, none secret) of a class colour c: a ColorMixin
 -- (c:GetRGB()) or a table with fields r, g, b (RAID_CLASS_COLORS), or nil.
 local function readRGB(api, c)
