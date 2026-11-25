@@ -3889,7 +3889,8 @@ local function SlashDebug(arg)
   Print("debug: " .. QuestText(unit, "target"))
   -- A quest hostile whose icons could not be told (single chevron): say what its tooltip gave.
   local questInfo = Info(unit)
-  if questInfo.questKindSource == "none" or questInfo.questKindSource == "missing" then
+  if questInfo.questKindSource == "none" or questInfo.questKindSource == "missing"
+    or questInfo.questKindSource == "guessed from the quest log" then
     for _, text in ipairs(Core.QuestKindTrace(unitAPI, unit)) do
       Print("debug: " .. text)
     end

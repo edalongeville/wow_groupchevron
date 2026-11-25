@@ -1666,51 +1666,121 @@ function Core.QuestKindTrace(api, unit)
   return out
 end
 
--- QuestLogSummary describes the player's quest log for /gchev debug: how many quests it holds and
--- how many unfinished objectives of each type (item, monster, other), and how many could not be
--- read (a secret value, an error). Diagnostic only, to see whether the quest log stays readable
--- where the unit's tooltip does not (api.GetNumQuestLogEntries, api.GetQuestLogInfo,
--- api.GetQuestObjectives).
-function Core.QuestLogSummary(api)
+-- questLogCounts counts the unfinished objectives of the player's quest log by type (item,
+-- monster, other) and the ones it could not read (a secret value, an error, an objective without
+-- a type). onMapOnly keeps the quests the client flags isOnMap (a boolean) and counts as
+-- unreadable a quest whose flag is missing or secret. It returns the counts and the number of
+-- quests counted, or nil when the quest log cannot be walked (missing APIs, unreadable count).
+local function questLogCounts(api, onMapOnly)
   if type(api) ~= "table" or type(api.GetNumQuestLogEntries) ~= "function"
     or type(api.GetQuestLogInfo) ~= "function" or type(api.GetQuestObjectives) ~= "function" then
-    return "quest log: API missing"
+    return nil
   end
   local n = call(api, "GetNumQuestLogEntries")
   if type(n) ~= "number" then
-    return "quest log: entry count unreadable"
+    return nil
   end
-  local quests, item, monster, other, unreadable = 0, 0, 0, 0, 0
+  local counts = { item = 0, monster = 0, other = 0, unreadable = 0 }
+  local quests = 0
   for i = 1, n do
     local info = call(api, "GetQuestLogInfo", i)
     local header = read(api, info, "isHeader")
     local id = read(api, info, "questID")
-    if type(info) == "table" and header == false and type(id) == "number" then
+    local counted = true
+    if onMapOnly and header == false then
+      local onMap = read(api, info, "isOnMap")
+      if type(onMap) ~= "boolean" then
+        counts.unreadable = counts.unreadable + 1
+        counted = false
+      else
+        counted = onMap
+      end
+    end
+    if type(info) == "table" and header == false and type(id) == "number" and counted then
       quests = quests + 1
       local list = call(api, "GetQuestObjectives", id)
       if type(list) ~= "table" then
-        unreadable = unreadable + 1
+        counts.unreadable = counts.unreadable + 1
       else
         for j = 1, #list do
           local o = list[j]
           local finished, kind = read(api, o, "finished"), read(api, o, "type")
           if finished == false then
-            if kind == "item" then
-              item = item + 1
-            elseif kind == "monster" then
-              monster = monster + 1
+            if kind == "item" or kind == "monster" then
+              counts[kind] = counts[kind] + 1
             elseif kind == nil then
-              unreadable = unreadable + 1
+              counts.unreadable = counts.unreadable + 1
             else
-              other = other + 1
+              counts.other = counts.other + 1
             end
           end
         end
       end
     end
   end
-  return string.format("quest log: %d quest(s); unfinished objectives: %d item, %d monster, %d other; %d unreadable",
-    quests, item, monster, other, unreadable)
+  return counts, quests
+end
+
+-- QuestLogSummary describes the player's quest log for /gchev debug: how many quests it holds and
+-- how many unfinished objectives of each type, for the whole log and for the quests flagged
+-- isOnMap, and how many could not be read. Diagnostic only, to see whether the quest log stays
+-- readable where the unit's tooltip does not.
+function Core.QuestLogSummary(api)
+  local all, quests = questLogCounts(api, false)
+  if not all then
+    return "quest log: API missing or entry count unreadable"
+  end
+  local map, mapQuests = questLogCounts(api, true)
+  return string.format("quest log: %d quest(s); unfinished objectives: %d item, %d monster, %d other, %d unreadable;"
+    .. " on the map: %d quest(s), %d item, %d monster, %d other, %d unreadable", quests, all.item, all.monster,
+    all.other, all.unreadable, mapQuests, map.item, map.monster, map.other, map.unreadable)
+end
+
+-- TooltipTextsSecret is true when unit's tooltip data lists a QuestObjective line whose text and
+-- completed fields are both unreadable (a secret value), as in dungeons on the Forever client:
+-- QuestKindLookup then cannot tell what the objective is.
+function Core.TooltipTextsSecret(api, unit)
+  if type(api) ~= "table" or type(api.GetTooltipUnit) ~= "function" or type(unit) ~= "string" or unit == ""
+    or isSecret(api, unit) then
+    return false
+  end
+  local tObjective = read(api, api.TooltipLineTypes, "QuestObjective")
+  local lines = read(api, call(api, "GetTooltipUnit", unit), "lines")
+  if tObjective == nil or type(lines) ~= "table" then
+    return false
+  end
+  for i = 1, 200 do
+    local line = read(api, lines, i)
+    if line == nil then
+      break
+    end
+    if read(api, line, "type") == tObjective and type(read(api, line, "completed")) ~= "boolean"
+      and type(read(api, line, "leftText")) ~= "string" then
+      return true
+    end
+  end
+  return false
+end
+
+-- QuestLogGuess guesses what is left to do to a quest hostile whose tooltip cannot be read
+-- (TooltipTextsSecret): the unfinished objectives of the quests the client flags isOnMap decide,
+-- "monster" when they are all kills, "item" when they are all items to loot. Anything else (a
+-- mix, another type, an unreadable objective or flag, no such objective, an unreadable quest log)
+-- gives nil: the single chevron stays. It is a guess: the objective is not tied to the unit.
+function Core.QuestLogGuess(api, unit)
+  if not Core.TooltipTextsSecret(api, unit) then
+    return nil
+  end
+  local c = questLogCounts(api, true)
+  if not c or c.unreadable > 0 or c.other > 0 then
+    return nil
+  end
+  if c.item > 0 and c.monster == 0 then
+    return "item"
+  elseif c.monster > 0 and c.item == 0 then
+    return "monster"
+  end
+  return nil
 end
 
 -- readRGB returns the r, g, b (numbers in 0..1, none secret) of a class colour c: a ColorMixin
@@ -1820,6 +1890,16 @@ function Core.UnitInfo(api, unit, settings)
     -- player's (seen in game on WoW: Forever for an item to loot from it): the tooltip wins.
     if info.quest ~= true and mineOpen == true then
       info.quest, info.questSource = true, "tooltip"
+    end
+    -- Dungeons: the tooltip's texts are secret, so nothing was typed; the quest log's open
+    -- objectives on the map decide when they are all of one type (a guess, see QuestLogGuess).
+    if info.quest == true and info.questSource == "unit" and info.questKindSource == "none" then
+      local guess = Core.QuestLogGuess(api, unit)
+      if guess == "monster" then
+        info.questKill, info.questKindSource = true, "guessed from the quest log"
+      elseif guess == "item" then
+        info.questLoot, info.questKindSource = true, "guessed from the quest log"
+      end
     end
     if info.quest ~= true then
       info.partyQuest, info.partyQuestSource = Core.PartyQuestLookup(api, unit)

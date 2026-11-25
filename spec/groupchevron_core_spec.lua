@@ -719,9 +719,37 @@ describe("GroupChevron Core", function()
         GetQuestLogInfo = function(i) return log[i] end,
         GetQuestObjectives = function(id) return objectives[id] end,
       })
-      assert.are.equal("quest log: 2 quest(s); unfinished objectives: 1 item, 1 monster, 1 other; 0 unreadable",
-        Core.QuestLogSummary(api))
-      assert.are.equal("quest log: API missing", Core.QuestLogSummary({}))
+      -- No isOnMap flag: the whole log is counted, the on-map part is unreadable.
+      assert.are.equal("quest log: 2 quest(s); unfinished objectives: 1 item, 1 monster, 1 other, 0 unreadable;"
+        .. " on the map: 0 quest(s), 0 item, 0 monster, 0 other, 2 unreadable", Core.QuestLogSummary(api))
+      assert.are.equal("quest log: API missing or entry count unreadable", Core.QuestLogSummary({}))
+      -- The guess: secret objective texts and on-map objectives of one type only.
+      local secretTip = { { type = 17, leftText = SECRET, id = SECRET }, { type = 8, leftText = SECRET } }
+      log[1].isOnMap, log[3].isOnMap = true, false
+      objectives[1] = { { type = "item", finished = false }, { type = "item", finished = true } }
+      api = tooltipAPI(secretTip, {
+        GetNumQuestLogEntries = function() return #log end,
+        GetQuestLogInfo = function(i) return log[i] end,
+        GetQuestObjectives = function(id) return objectives[id] end,
+      })
+      assert.are.equal("item", Core.QuestLogGuess(api, "nameplate1"))
+      -- A kill objective on the map too: a mix, no guess.
+      log[3].isOnMap = true
+      objectives[2] = { { type = "monster", finished = false } }
+      assert.is_nil(Core.QuestLogGuess(api, "nameplate1"))
+      log[1].isOnMap = false
+      assert.are.equal("monster", Core.QuestLogGuess(api, "nameplate1"))
+      -- Another type on the map: no guess.
+      objectives[2] = { { type = "monster", finished = false }, { type = "object", finished = false } }
+      assert.is_nil(Core.QuestLogGuess(api, "nameplate1"))
+      -- A readable tooltip is never guessed.
+      objectives[2] = { { type = "monster", finished = false } }
+      local readable = tooltipAPI({ { type = 17, leftText = "Q", id = 5 }, { type = 8, leftText = "x : 0/1" } }, {
+        GetNumQuestLogEntries = function() return #log end,
+        GetQuestLogInfo = function(i) return log[i] end,
+        GetQuestObjectives = function(id) return objectives[id] end,
+      })
+      assert.is_nil(Core.QuestLogGuess(readable, "nameplate1"))
     end)
 
     it("IsSelfName: the tooltip's full name (with the last name) is the player's", function()
